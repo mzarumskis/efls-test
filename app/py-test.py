@@ -10,6 +10,7 @@ import time
 import sys
 import binascii
 import crc8
+import threading
 
 version = "V-0.0.1"
 
@@ -45,22 +46,12 @@ def frame_02(terminal):
     print("Data->TX {0}".format(buff.hex().upper()))
     terminal.write(buff)    
 
-def main():
-
+def readSerial(ser):
     global isSwitchedToFota
     global noPacketTimeout
     global frameErrorCounter
+    global stop_threads
     
-    print("EFLS Sensor Test environment {0}".format(version))
-    print("Platform {0}".format(platform.system()))
-    
-    ports = serial.tools.list_ports.comports()
-    
-    if  platform.system() == "Windows":
-        print([port.device for port in ports])
-    
-    ser = open_serial("COM2")     
-        
     while (ser.isOpen()):
         rawdata = ser.read(64)
         
@@ -79,7 +70,47 @@ def main():
             frameErrorCounter = frameErrorCounter + 1
             print("RS485 No Frame ERROR {}".format(frameErrorCounter))
             frame_02(ser)
+        if stop_threads:
+            break    
+    
+
+def main():
+
+    global isSwitchedToFota
+    global noPacketTimeout
+    global frameErrorCounter
+    global stop_threads 
+    
+    print("EFLS Sensor Test environment {0}".format(version))
+    print("Platform {0}".format(platform.system()))
+    
+    stop_threads = False
+    ports = serial.tools.list_ports.comports()
+    
+    if  platform.system() == "Windows":
+        print([port.device for port in ports])
+    
+    ser = open_serial("COM2")     
+    
+    t1 = threading.Thread(target = readSerial, args=[ser])
         
+    t1.start()
+    
+   
+    while 1:
+        try:
+           time.sleep(1) #delay 50mS
+        except KeyboardInterrupt:
+           stop_threads = True
+           break       
+       
+            
+def  exit_gracefully():
+    sys.exit()
+    raise(SystemExit) 
         
 if __name__ == '__main__':
-   main()
+    main()
+ 
+         
+             
