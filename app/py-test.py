@@ -11,9 +11,14 @@ import sys
 import binascii
 import crc8
 import threading
+from queue import Queue 
+
+
 
 version = "V-0.0.1"
 
+
+DELAY_AFTER_RECEIVE = 0.05
 LOOP_IN_MS = 10
 NO_RECEIVE_TIMOUT_IN_S = 2 * LOOP_IN_MS
 
@@ -37,41 +42,88 @@ def AddCrc(data):
   return crc & 0xFF
 
 # switch to FOTA mode
-def frame_02(terminal):
+def frame_02():
     buff = bytearray(b'\x31\xFE')
-    buff.append(2)
+    buff.append(9)
     buff.append(0)
     crc = AddCrc(buff)
     buff.append(crc)
     print("Data->TX {0}".format(buff.hex().upper()))
-    terminal.write(buff)    
+    serTerminal.write(buff)    
 
-def readSerial(ser):
-    global isSwitchedToFota
-    global noPacketTimeout
-    global frameErrorCounter
+# get Build    
+def frame_09():
+    buff = bytearray(b'\x31\xFE')
+    buff.append(9)
+    buff.append(0)
+    crc = AddCrc(buff)
+    buff.append(crc)
+    print("Data->TX {0}".format(buff.hex().upper()))
+    serTerminal.write(buff)    
+
+
+def getDataFromSerial():
+    data = serialQ.get()
+    if data:
+        return data
+    time.sleep(1/LOOP_IN_MS) #delay 50mS    
+
+def getAnyFromRS485():
+    if serialQ.get():
+        return     
+    time.sleep(1/LOOP_IN_MS) #delay 50mS
+     
+def readSerial(ser, serialQ):
     global stop_threads
     
     while (ser.isOpen()):
-        rawdata = ser.read(64)
+        rawdata = ser.read(256)
         
         if rawdata:
-            print("Data->RX {0}".format(rawdata.hex().upper()))
-            if not isSwitchedToFota:
-                time.sleep(0.05) #delay 50mS
-                frame_02(ser)
-                noPacketTimeout = 0
-                #isSwitchedToFota =1
-        
-        noPacketTimeout = noPacketTimeout + 1    
-        time.sleep(1.0/LOOP_IN_MS)
-        if noPacketTimeout > NO_RECEIVE_TIMOUT_IN_S:
-            noPacketTimeout = 0
-            frameErrorCounter = frameErrorCounter + 1
-            print("RS485 No Frame ERROR {}".format(frameErrorCounter))
-            frame_02(ser)
+            serialQ.put(rawdata)
+           
         if stop_threads:
             break    
+        time.sleep(1/LOOP_IN_MS) #delay 50mS
+
+def isPackedValid(data):
+    
+    if len(data) < 5:
+        return False
+    if len(data) < data[3]+5:
+        return False
+    if len(data) < data[3]+3:
+        return False
+    if data[0] != 0x31:
+        return False 
+    
+    return packetCrcCheck(data)
+      
+def packetCrcCheck(data):
+    crc = 0x0000
+    for n in data[2:data[3]+4]:  
+      crc = crc ^ (n << 8) 
+      for bitnumber in range(0,8):
+        if crc & 0x8000 : 
+            crc =  crc  ^  (0x1070 << 3)
+        crc = ( crc << 1 )
+    crc = crc >> 8
+    if crc & 0xFF == data[data[3]+4]:
+        return True
+    else:
+        return False
+
+def getBuild():
+    getAnyFromRS485()
+    time.sleep(DELAY_AFTER_RECEIVE) #delay 
+    frame_09()
+    data = getDataFromSerial()
+    print("Data->RX {0}".format(data.hex().upper()))
+    if isPackedValid(data):
+         print("Build {0}".format(data[4:data[3]+3]))
+       
+    else:
+        print("Packet ERROR")
     
 
 def main():
@@ -80,6 +132,10 @@ def main():
     global noPacketTimeout
     global frameErrorCounter
     global stop_threads 
+    global serialQ
+    global serTerminal
+    
+    serialQ = Queue() 
     
     print("EFLS Sensor Test environment {0}".format(version))
     print("Platform {0}".format(platform.system()))
@@ -90,16 +146,18 @@ def main():
     if  platform.system() == "Windows":
         print([port.device for port in ports])
     
-    ser = open_serial("COM2")     
+    serTerminal = open_serial("COM2")     
     
-    t1 = threading.Thread(target = readSerial, args=[ser])
+    t1 = threading.Thread(target = readSerial, args=[serTerminal, serialQ])
         
     t1.start()
     
    
-    while 1:
+    while True:
         try:
-           time.sleep(1) #delay 50mS
+           
+           getBuild() 
+           
         except KeyboardInterrupt:
            stop_threads = True
            break       
