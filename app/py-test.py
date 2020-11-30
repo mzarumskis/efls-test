@@ -11,12 +11,15 @@ import sys
 import binascii
 import crc8
 import threading
+import os
 from queue import Queue 
+from pickle import TRUE
 
 
 
 version = "V-0.0.1"
 
+FOTA_BLOCK_SZIE_IN_BYTES = 16
 
 DELAY_AFTER_RECEIVE = 0.05
 LOOP_IN_MS = 10
@@ -25,6 +28,11 @@ NO_RECEIVE_TIMOUT_IN_S = 2 * LOOP_IN_MS
 isSwitchedToFota = 0
 noPacketTimeout = 0
 frameErrorCounter = 0 
+
+
+#Command definitions
+
+WRITE_FOTA_RECORD = 4
 
 def open_serial(port):
     ser = serial.Serial(port, 19200, timeout=0.1)
@@ -41,10 +49,10 @@ def AddCrc(data):
   crc = crc >> 8
   return crc & 0xFF
 
-# switch to FOTA mode
+# switch to SLAVE mode
 def frame_02():
     buff = bytearray(b'\x31\xFE')
-    buff.append(9)
+    buff.append(2)
     buff.append(0)
     crc = AddCrc(buff)
     buff.append(crc)
@@ -60,6 +68,21 @@ def frame_09():
     buff.append(crc)
     print("Data->TX {0}".format(buff.hex().upper()))
     serTerminal.write(buff)    
+
+def frame_04_writeRecordToFlash(recordIdx,size ,data):
+    buff = bytearray(b'\x31\xFE')
+    buff.append(WRITE_FOTA_RECORD)
+    buff.append(size+2)
+    buff.append((recordIdx >> 8) & 0xFF)
+    buff.append(recordIdx & 0xFF)
+    
+    for b in data:
+        buff.append(b)
+        
+    crc = AddCrc(buff)
+    buff.append(crc)
+    print("Data->TX {0}".format(buff.hex().upper()))
+    #serTerminal.write(buff)    
 
 
 def getDataFromSerial():
@@ -98,6 +121,15 @@ def isPackedValid(data):
         return False 
     
     return packetCrcCheck(data)
+
+def isBuildAckFrame(data):
+    if data[2] == 10:
+        return True
+    return False
+def isSwticToSlavedAckFrame(data):
+    if data[2] == 3 and data[4] == 2 :
+        return True
+    return False
       
 def packetCrcCheck(data):
     crc = 0x0000
@@ -114,18 +146,46 @@ def packetCrcCheck(data):
         return False
 
 def getBuild():
-    getAnyFromRS485()
-    time.sleep(DELAY_AFTER_RECEIVE) #delay 
-    frame_09()
-    data = getDataFromSerial()
-    print("Data->RX {0}".format(data.hex().upper()))
-    if isPackedValid(data):
-         print("Build {0}".format(data[4:data[3]+3]))
-       
-    else:
-        print("Packet ERROR")
-    
+    tryCount = 3
+    while(tryCount):
+        getAnyFromRS485()
+        time.sleep(DELAY_AFTER_RECEIVE) #delay 
+        frame_09()
+        data = getDataFromSerial()
+        print("Data->RX {0}".format(data.hex().upper()))
+        tryCount = tryCount - 1
+        if isPackedValid(data):
+             if isBuildAckFrame(data):
+                 print("Build {0}".format(data[4:data[3]+3]))
+                 break
+        else:
+            print("Packet ERROR")
+            
 
+def switchToSlaveMode():
+        
+    tryCount = 3
+    while(tryCount):
+        getAnyFromRS485()
+        time.sleep(DELAY_AFTER_RECEIVE) #delay 
+        frame_02()
+        data = getDataFromSerial()
+        print("Data->RX {0}".format(data.hex().upper()))
+        tryCount = tryCount - 1
+        if isPackedValid(data):
+             if isSwticToSlavedAckFrame(data):
+                 print("Slave Mode Entered")
+                 break
+        else:
+            print("Packet ERROR")
+            
+def getBinFile():
+    dir_path = os.path.dirname(os.path.realpath(__file__)) 
+    for d, subD, f in os.walk(dir_path):
+        for file in f:
+            if file.endswith('.bin'): 
+                return file
+    return ""
 def main():
 
     global isSwitchedToFota
@@ -140,23 +200,49 @@ def main():
     print("EFLS Sensor Test environment {0}".format(version))
     print("Platform {0}".format(platform.system()))
     
-    stop_threads = False
-    ports = serial.tools.list_ports.comports()
+    developMode = True
     
-    if  platform.system() == "Windows":
-        print([port.device for port in ports])
-    
-    serTerminal = open_serial("COM2")     
-    
-    t1 = threading.Thread(target = readSerial, args=[serTerminal, serialQ])
+    if  developMode:
         
-    t1.start()
+        print("Opne file")
+        fileName = getBinFile()
+        if fileName != "":
+            print("File found: {0}".format(fileName))  
+            file = open(fileName, "rb")
+            recordIdx =0
+            while True:
+                data = file.read(FOTA_BLOCK_SZIE_IN_BYTES)
+                if data:
+                    #print("File found: {0:X}:{1}".format(recordIdx,data.hex().upper()))   
+                    frame_04_writeRecordToFlash(recordIdx, len(data), data)
+                    
+                    recordIdx = recordIdx +1
+                else:
+                    break
+        
+        time.sleep(1)   
+    else:
+        stop_threads = False
+        ports = serial.tools.list_ports.comports()
+        
+        if  platform.system() == "Windows":
+            print([port.device for port in ports])
+        
+        serTerminal = open_serial("COM2")     
+        
+        t1 = threading.Thread(target = readSerial, args=[serTerminal, serialQ])
+            
+        t1.start()
+        
+        getBuild() 
+        switchToSlaveMode()
     
-   
+    
+    
     while True:
         try:
            
-           getBuild() 
+           time.sleep(1)   
            
         except KeyboardInterrupt:
            stop_threads = True
