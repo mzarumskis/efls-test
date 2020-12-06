@@ -19,7 +19,7 @@ from pickle import TRUE
 
 version = "V-0.0.1"
 
-FOTA_BLOCK_SZIE_IN_BYTES = 16
+FOTA_BLOCK_SZIE_IN_BYTES = 64
 
 DELAY_AFTER_RECEIVE = 0.05
 LOOP_IN_MS = 10
@@ -33,6 +33,7 @@ frameErrorCounter = 0
 #Command definitions
 
 WRITE_FOTA_RECORD = 4
+WRITE_FOTA_HEADER = 11
 
 def open_serial(port):
     ser = serial.Serial(port, 19200, timeout=0.1)
@@ -72,9 +73,10 @@ def frame_09():
 def frame_04_writeRecordToFlash(recordIdx,size ,data):
     buff = bytearray(b'\x31\xFE')
     buff.append(WRITE_FOTA_RECORD)
-    buff.append(size+2)
-    buff.append((recordIdx >> 8) & 0xFF)
+    buff.append(size+3)
     buff.append(recordIdx & 0xFF)
+    buff.append((recordIdx >> 8) & 0xFF)
+    buff.append(size)
     
     for b in data:
         buff.append(b)
@@ -82,14 +84,37 @@ def frame_04_writeRecordToFlash(recordIdx,size ,data):
     crc = AddCrc(buff)
     buff.append(crc)
     print("Data->TX {0}".format(buff.hex().upper()))
-    #serTerminal.write(buff)    
+    serTerminal.write(buff)    
+
+def frame_11_writeFotaHeader(version):
+    buff = bytearray(b'\x31\xFE')
+    buff.append(WRITE_FOTA_HEADER)
+    buff.append(3)
+    buff.append(version[0])
+    buff.append(version[1])
+    buff.append(version[2])
+              
+    crc = AddCrc(buff)
+    buff.append(crc)
+    print("Data->TX {0}".format(buff.hex().upper()))
+    serTerminal.write(buff)    
 
 
 def getDataFromSerial():
     data = serialQ.get()
     if data:
+        #time.sleep(1/LOOP_IN_MS) #delay 50mS 
         return data
-    time.sleep(1/LOOP_IN_MS) #delay 50mS    
+    
+    return ""   
+
+def getDataFromSerialWithTimeout(timeOut):
+    data = serialQ.get(timeout = timeOut)
+    if data:
+        #time.sleep(1/LOOP_IN_MS) #delay 50mS 
+        return data
+    
+    return ""   
 
 def getAnyFromRS485():
     if serialQ.get():
@@ -128,6 +153,11 @@ def isBuildAckFrame(data):
     return False
 def isSwticToSlavedAckFrame(data):
     if data[2] == 3 and data[4] == 2 :
+        return True
+    return False
+
+def isWriteRecorddAckFrame(data):
+    if data[2] == 5 and data[4] == 4 :
         return True
     return False
       
@@ -179,6 +209,21 @@ def switchToSlaveMode():
         else:
             print("Packet ERROR")
             
+            
+def waitWriteRecordAck(idx):
+    try:
+        data = getDataFromSerialWithTimeout(0.5)
+        print("Data->RX {0}".format(data.hex().upper()))
+        if isPackedValid(data):
+           if isWriteRecorddAckFrame(data):
+               idxAck = (data[6]<<8) + data[5]
+               if idxAck == idx:
+                   return True
+        return False
+    except :
+        print("No Data Timout")  
+        return False     
+
 def getBinFile():
     dir_path = os.path.dirname(os.path.realpath(__file__)) 
     for d, subD, f in os.walk(dir_path):
@@ -186,6 +231,58 @@ def getBinFile():
             if file.endswith('.bin'): 
                 return file
     return ""
+
+def getVersionFromFileName(fileName):
+    if fileName != "":
+        print("File found: {0}".format(fileName))
+        name = fileName.split("_")
+        version = name[1].split(".")
+        data = bytes.fromhex(version[0]+ version[1]+version[2])
+        return data
+        
+    return ""
+        
+        
+def fwUploadTask(updateFotaHeaderOnly):
+    print("Opne file")
+    fileName = getBinFile()
+    if fileName != "":
+        
+        if not updateFotaHeaderOnly:
+            
+                file = open(fileName, "rb")
+                recordIdx =0
+                fileSize = len(file.read())
+                print("File found: {0} szie {1}".format(fileName, fileSize))
+                file.seek(0)      
+                while True:
+                    data = file.read(FOTA_BLOCK_SZIE_IN_BYTES)
+                    if data:
+                        writeOk = False
+                        
+                        while not writeOk:
+                                
+                            frame_04_writeRecordToFlash(recordIdx, len(data), data)
+                            if waitWriteRecordAck(recordIdx):
+                               writeOk = True
+                            else:
+                                print("Write Error {0}".format(recordIdx)) 
+                            
+                        recordIdx = recordIdx +1
+                        bytesSent = (recordIdx * FOTA_BLOCK_SZIE_IN_BYTES)
+                        print("Sent {0}%".format(round((bytesSent/fileSize) * 100)))
+                        
+                                     
+                    else:
+                        version = getVersionFromFileName(fileName)    
+                        frame_11_writeFotaHeader(version)   
+        
+                        break
+        else:
+            version = getVersionFromFileName(fileName)    
+            frame_11_writeFotaHeader(version)   
+                            
+
 def main():
 
     global isSwitchedToFota
@@ -200,25 +297,11 @@ def main():
     print("EFLS Sensor Test environment {0}".format(version))
     print("Platform {0}".format(platform.system()))
     
-    developMode = True
+    developMode = False
     
     if  developMode:
         
-        print("Opne file")
-        fileName = getBinFile()
-        if fileName != "":
-            print("File found: {0}".format(fileName))  
-            file = open(fileName, "rb")
-            recordIdx =0
-            while True:
-                data = file.read(FOTA_BLOCK_SZIE_IN_BYTES)
-                if data:
-                    #print("File found: {0:X}:{1}".format(recordIdx,data.hex().upper()))   
-                    frame_04_writeRecordToFlash(recordIdx, len(data), data)
-                    
-                    recordIdx = recordIdx +1
-                else:
-                    break
+        getVersionFromFileName()
         
         time.sleep(1)   
     else:
@@ -236,7 +319,7 @@ def main():
         
         getBuild() 
         switchToSlaveMode()
-    
+        fwUploadTask(False)
     
     
     while True:
