@@ -28,15 +28,16 @@ NO_RECEIVE_TIMOUT_IN_S = 2 * LOOP_IN_MS
 isSwitchedToFota = 0
 noPacketTimeout = 0
 frameErrorCounter = 0 
-RS485_BOUD_RATE = 230400
+RS485_BOUD_RATE_BOOT_ONLY = 230400
+RS485_BOUD_RATE_APP = 19200
 
 #Command definitions
 
 WRITE_FOTA_RECORD = 4
 WRITE_FOTA_HEADER = 11
 
-def open_serial(port):
-    ser = serial.Serial(port, RS485_BOUD_RATE, timeout=0.1)
+def open_serial(port, boudR):
+    ser = serial.Serial(port, boudR, timeout=0.1)
     return ser
 
 def AddCrc(data):
@@ -324,6 +325,17 @@ def main():
     global stop_threads 
     global serialQ
     global serTerminal
+    global bootForce
+    global boudRate
+    
+    bootForce = False
+    boudRate = RS485_BOUD_RATE_APP
+    n = len(sys.argv)
+    for i in range(1, n):
+        print(sys.argv[i], end = " \r\n")
+        if sys.argv[i] == "boot":
+            bootForce = True
+            boudRate = RS485_BOUD_RATE_BOOT_ONLY
     
     serialQ = Queue() 
     
@@ -338,25 +350,26 @@ def main():
         
         time.sleep(1)   
     else:
+       
+            
         stop_threads = False
         ports = serial.tools.list_ports.comports()
         
         if  platform.system() == "Windows":
             print([port.device for port in ports])
         
-        serTerminal = open_serial("COM2")     
+        serTerminal = open_serial("COM2", boudRate)     
         
         t1 = threading.Thread(target = readSerial, args=[serTerminal, serialQ])
             
         t1.start()
-        switchToFwUpdate()
+        if bootForce:
+            switchToFwUpdate()
         
         getBuild() 
         switchToSlaveMode()
         fwUploadTask(False)
-       # while True:
-        #    switchToFwUpdate()
-         #   time.sleep(0.05)
+       
             
     
     while True:
