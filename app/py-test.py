@@ -28,7 +28,7 @@ NO_RECEIVE_TIMOUT_IN_S = 2 * LOOP_IN_MS
 isSwitchedToFota = 0
 noPacketTimeout = 0
 frameErrorCounter = 0 
-
+RS485_BOUD_RATE = 230400
 
 #Command definitions
 
@@ -36,7 +36,7 @@ WRITE_FOTA_RECORD = 4
 WRITE_FOTA_HEADER = 11
 
 def open_serial(port):
-    ser = serial.Serial(port, 19200, timeout=0.1)
+    ser = serial.Serial(port, RS485_BOUD_RATE, timeout=0.1)
     return ser
 
 def AddCrc(data):
@@ -50,6 +50,12 @@ def AddCrc(data):
   crc = crc >> 8
   return crc & 0xFF
 
+def frame_BOOT_Commanded():
+    buff = bytearray(b'\x2E\x2E\x2E\x2E\x2E\x2E\x2E\x2E\x2E\x2E\x2E\x2E')
+   
+    print("Data->TX {0}".format(buff.hex().upper()))
+    serTerminal.write(buff)    
+    
 # switch to SLAVE mode
 def frame_02():
     buff = bytearray(b'\x31\xFE')
@@ -114,7 +120,8 @@ def getDataFromSerialWithTimeout(timeOut):
         #time.sleep(1/LOOP_IN_MS) #delay 50mS 
         return data
     
-    return ""   
+    return ""  
+
 
 def getAnyFromRS485():
     if serialQ.get():
@@ -175,6 +182,20 @@ def packetCrcCheck(data):
     else:
         return False
 
+def switchToFwUpdate():
+    dummy =""
+    while True:
+        frame_BOOT_Commanded()
+        try:
+            data = getDataFromSerialWithTimeout(0.05)
+            
+            if isPackedValid(data):
+               return True 
+        except :
+            dummy="e"
+   
+   # data = getDataFromSerial()
+
 def getBuild():
     tryCount = 3
     while(tryCount):
@@ -223,7 +244,19 @@ def waitWriteRecordAck(idx):
     except :
         print("No Data Timout")  
         return False     
-
+def waitAckPacket():
+     try:
+        data = getDataFromSerialWithTimeout(0.5)
+        print("Data->RX {0}".format(data.hex().upper()))
+      
+    
+        return True
+     except :
+        print("No Data Timout")  
+        return False     
+    
+    
+    
 def getBinFile():
     dir_path = os.path.dirname(os.path.realpath(__file__)) 
     for d, subD, f in os.walk(dir_path):
@@ -276,7 +309,7 @@ def fwUploadTask(updateFotaHeaderOnly):
                     else:
                         version = getVersionFromFileName(fileName)    
                         frame_11_writeFotaHeader(version)   
-        
+                        waitAckPacket()
                         break
         else:
             version = getVersionFromFileName(fileName)    
@@ -316,11 +349,15 @@ def main():
         t1 = threading.Thread(target = readSerial, args=[serTerminal, serialQ])
             
         t1.start()
+        switchToFwUpdate()
         
         getBuild() 
         switchToSlaveMode()
         fwUploadTask(False)
-    
+       # while True:
+        #    switchToFwUpdate()
+         #   time.sleep(0.05)
+            
     
     while True:
         try:

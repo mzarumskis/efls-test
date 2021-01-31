@@ -16,7 +16,8 @@ FOTA_BLOCK_SZIE_IN_BYTES = 64
 BLOCK_BEFOR_CRC_ANDSIZE_BYTES = 192
 BOOT_RECORD_SIZE_BYTES = 16
 
-DIR_ = "\Debug"
+#DIR_ = "\Debug"
+DIR_ = ""
 
 version = "V-0.0.1"
 
@@ -79,18 +80,18 @@ def convertFile():
             
             outdata = bytearray(data)
         
-            outdata [idx] = (fileSize >> 24) & 0xFF
-            idx = idx + 1
-            outdata [idx] = (fileSize >> 16) & 0xFF
+            outdata [idx] = (fileSize) & 0xFF
             idx = idx + 1
             outdata [idx] = (fileSize >> 8) & 0xFF
             idx = idx + 1
-            outdata [idx] = (fileSize) & 0xFF
+            outdata [idx] = (fileSize >> 16) & 0xFF
+            idx = idx + 1
+            outdata [idx] = (fileSize >> 24) & 0xFF
             
             idx = idx + 1
-            outdata [idx] = (crcOut >> 8) & 0xFF
-            idx = idx + 1
             outdata [idx] = (crcOut) & 0xFF
+            idx = idx + 1
+            outdata [idx] = (crcOut>> 8) & 0xFF
             
             file.seek(0)     
             file.write(outdata)
