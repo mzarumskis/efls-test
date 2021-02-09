@@ -355,7 +355,12 @@ def getDataFromSensor(win):
                dataMap["Cap2"] = data[9]<<8 | data[10]
                dataMap["level1"] = data[13]<<8 | data[14]
                dataMap["level2"] = data[15]<<8 | data[16]
-               dataMap["Temp"] = data[4]
+               if data[4] & 0x80:
+                  dataMap["Temp"] = (data[4]-2) * (-1)
+               else:
+                  dataMap["Temp"] = data[4]      
+               
+               
                dataMap["Photo"] = data[6]
                dataMap["TempError"] = data[5]
                  
