@@ -206,7 +206,7 @@ def switchToFwUpdate():
     while True:
         frame_BOOT_Commanded()
         try:
-            data = getDataFromSerialWithTimeout(0.05)
+            data = getDataFromSerialWithTimeout(0.1)
             print("data")
             if isPackedValid(data):
                return True 
@@ -217,6 +217,7 @@ def switchToFwUpdate():
    # data = getDataFromSerial()
 
 def getBuild():
+    global fwBuild
     tryCount = 3
     while(tryCount):
         getAnyFromRS485()
@@ -224,10 +225,13 @@ def getBuild():
         frame_09()
         data = getDataFromSerial()
         print("Data->RX {0}".format(data.hex().upper()))
+      
+      
         tryCount = tryCount - 1
         if isPackedValid(data):
              if isBuildAckFrame(data):
                  print("Build {0}".format(data[4:data[3]+3]))
+                 fwBuild = "{0}".format(data[4:data[3]+3])
                  break
         else:
             print("Packet ERROR")
@@ -235,21 +239,25 @@ def getBuild():
 
 def switchToSlaveMode():
         
-    tryCount = 3
+    tryCount = 5
+    getAnyFromRS485()
     while(tryCount):
-        getAnyFromRS485()
+        
         time.sleep(DELAY_AFTER_RECEIVE) #delay 
         frame_02()
-        data = getDataFromSerial()
-        print("Data->RX {0}".format(data.hex().upper()))
-        tryCount = tryCount - 1
-        if isPackedValid(data):
-             if isSwticToSlavedAckFrame(data):
-                 print("Slave Mode Entered")
-                 break
-        else:
-            print("Packet ERROR")
-            
+        try:
+            data = getDataFromSerialWithTimeout(0.5)
+            print("Data->RX {0}".format(data.hex().upper()))
+            tryCount = tryCount - 1
+            if isPackedValid(data):
+                 if isSwticToSlavedAckFrame(data):
+                     print("Slave Mode Entered")
+                     break
+            else:
+                print("Packet ERROR")
+        except :
+  
+           print("Timeout")    
             
 def waitWriteRecordAck(idx):
     try:
@@ -293,6 +301,7 @@ def getVersionFromFileName(fileName):
         
         
 def fwUploadTask(updateFotaHeaderOnly, filePath, win):
+    global progress
     print("Opne file")
     fileName = getBinFile(filePath)
     if filePath != "":
@@ -321,7 +330,7 @@ def fwUploadTask(updateFotaHeaderOnly, filePath, win):
                         bytesSent = (recordIdx * FOTA_BLOCK_SZIE_IN_BYTES)
                         progress = round((bytesSent/fileSize) * 100)
                         print("Sent {0}%".format(progress))
-                        win.FindElement('fwUpdateProgress').UpdateBar(progress, 100)
+                        #win.FindElement('fwUpdateProgress').UpdateBar(progress, 100)
                                      
                     else:
                         version = getVersionFromFileName(fileName)    
@@ -341,9 +350,16 @@ def getDataFromSensor(win):
         if isPackedValid(data):
            #print("Data->RX {0}".format(data.hex().upper())) 
            if data [2] == PERIODIC_DATA_RESPONCE:
-               print("Temp: {0}; TempStatus: {1}; Photo: {2}; CAP1: {3}pF; CAP2: {4}pF; Level1: {5}; Level2: {6}".format(data[4], data[5], data[6], data[7]|data[8], data[9]|data[10], data[13]|data[14], data[15]|data[16]))
-               win.find_element("-cap1-").update(values = "{0}".format(data[7]|data[8]))
-               dataMap["level1"] = data[13]+data[14]
+               print("Temp: {0}; TempStatus: {1}; Photo: {2}; CAP1: {3}pF; CAP2: {4}pF; Level1: {5}; Level2: {6}".format(data[4], data[5], data[6], data[7]<<8 |data[8], data[9]<<8|data[10], data[13]<<8|data[14], data[15]<<8|data[16]))
+               dataMap["Cap1"] = data[7] << 8 | data[8]
+               dataMap["Cap2"] = data[9]<<8 | data[10]
+               dataMap["level1"] = data[13]<<8 | data[14]
+               dataMap["level2"] = data[15]<<8 | data[16]
+               dataMap["Temp"] = data[4]
+               dataMap["Photo"] = data[6]
+               dataMap["TempError"] = data[5]
+                 
+               
         return True 
     except :
         dummy="e" 
@@ -365,23 +381,24 @@ def windows_ini():
     frame2_layout = [
         [sg.Text("                                                          ")],
         [sg.Text("Choose a file: "), sg.FileBrowse("File", key="-FILE-")],
-        [sg.Button("UPDATE")],[sg.ProgressBar(orientation="horizontal",max_value=10,size=(10, 20), key = "fwUpdateProgress")],
+        [sg.Button("UPDATE")],
+        [sg.ProgressBar(orientation="horizontal",max_value=10,size=(10, 20), key = "fwUpdateProgress"), sg.Text("0%  ", key = "progress")],
         ]
     information_column = [
                             [sg.Checkbox("Boot Only", key = "boot-checkbox"), sg.Combo("",size =(10,1), key = "port-list")],
                             [sg.Button("CONNECT")],
-                            [sg.Text("Fw Version:"), sg.Text("V01.02.01", key="-version-") ],
-                            [sg.Text("Build:"), sg.Text("Jan, 05, 2020")],
+                            [sg.Text("Fw Version:"), sg.Text("____________", key="-version-") ],
+                            [sg.Text("Build:"), sg.Text("______________________________", key = "-build-")],
                             [sg.HSeparator(color = "White"),],
                             [sg.Text("                                                          ")],
-                            [sg.Text("Temp:"),sg.Text("20", key="-temp-") ],
-                            [sg.Text("Status"),sg.Text("OK", key="-tempStatus-") ],
+                            [sg.Text("Temp:"),sg.Text("####", key="-temp-") ],
+                            [sg.Text("Status"),sg.Text("####", size = (6,1),key="-tempStatus-") ],
                             [sg.Text("")],
                             
-                            [sg.Text("CAP1:"),sg.Text("120", key="-cap1-") ,sg.Text("pF")],
-                            [sg.Text("CAP2:"),sg.Text("69", key="-cap2-") ,sg.Text("pF")],
+                            [sg.Text("CAP1:"),sg.Text("####", key="-cap1-") ,sg.Text("pF")],
+                            [sg.Text("CAP2:"),sg.Text("####", key="-cap2-") ,sg.Text("pF")],
                             [sg.Text("")],
-                             [sg.Text("Photo:"),sg.Text("ON", key="-photo-") ],
+                             [sg.Text("Photo:"),sg.Text("ON", size = (6,1), key="-photo-") ],
                            
                             [sg.Text("")],
                             [sg.Frame(layout = frame2_layout,  title="FW")],
@@ -469,16 +486,16 @@ def openPortThread(serialQ, bootOnlyBoud, port):
     
  
 # This function is called periodically from FuncAnimation
-def animate( xs, ys):
+def animate(value, xs, ys):
     global subPlot
     global xIdx
     # Read temperature (Celsius) from TMP
-    temp_c = np.random.random(1) * 50
+    
 
     # Add x and y to lists
     xIdx = xIdx + 1
     xs.append(xIdx)
-    ys.append(temp_c)
+    ys.append(value)
 
     # Limit x and y lists to 20 items
     xs = xs[-10:]
@@ -502,8 +519,27 @@ def updateThread(filePathName, win, bootMode):
         
     getBuild() 
     switchToSlaveMode()
-    fwUploadTask(bootMode, filePathName, win)
+    fwUploadTask(False, filePathName, win)
           
+def updateValues(win):
+    global fwBuild
+    #dataMap["level1"]
+    if dataMap["TempError"] == 1:
+       win.FindElement("-tempStatus-").Update("Error")
+    else:
+      win.FindElement("-tempStatus-").Update("OK")
+    
+    if dataMap["Photo"] == 1:
+       win.FindElement("-photo-").Update("OPEN")
+    else:
+      win.FindElement("-photo-").Update("CLOSE")  
+            
+    win.FindElement("-temp-").Update("{0}".format(dataMap["Temp"]))
+    win.FindElement("-cap1-").Update("{0}".format(dataMap["Cap1"]))
+    win.FindElement("-cap2-").Update("{0}".format(dataMap["Cap2"]))
+    win.FindElement("-build-").Update(fwBuild)
+    
+    
     
 def main():
 
@@ -521,8 +557,14 @@ def main():
     global port_connected
     global xIdx
     global dataMap
+    global progress
+    global fwVersion
+    global fwBuild
     
-    dataMap = {"level1":0, "level2": 0}
+    fwVersion = "____________"
+    fwBuild = "_____________________"
+    progress=0
+    dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0}
    
     win = windows_ini()
     br = plot_ini(win)
@@ -585,11 +627,19 @@ def main():
     #ani = animation.FuncAnimation(fig, animate, fargs=(xs, ys), interval=1000)
     plt.show()
     #win.FindElement("UPDATE").Update(disabled=True)
+    getBuildISAllowed = True
     while True:
         event, values = win.read(timeout = 0.2)
-        
+        win.FindElement('fwUpdateProgress').UpdateBar(progress, 100)
+        win.FindElement('progress').Update("{0}%".format(progress))
         if getDataFromSensor(win):
-            animate(xs, ys)
+            animate(dataMap["level1"], xs, ys)
+            if getBuildISAllowed:
+                getBuild()
+                getBuildISAllowed = False 
+            
+        updateValues(win)    
+            
         # End program if user closes window or
         # presses the OK button
         #FuncAnimation(fig, update(i,n), interval=1) 
@@ -597,7 +647,7 @@ def main():
             break
         elif event == "UPDATE":
             print("UPDATE: {0}".format(values["-FILE-"]))
-            
+            progress=0
             t2 = threading.Thread(target = updateThread, args=[values["-FILE-"], win, values["boot-checkbox"]])
             t2.start() 
         elif event == "CONNECT":
