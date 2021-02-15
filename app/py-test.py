@@ -35,7 +35,7 @@ version = "V-0.0.1"
 
 PERIODIC_DATA_RESPONCE = 1
 
-FOTA_BLOCK_SZIE_IN_BYTES = 64
+FOTA_BLOCK_SZIE_IN_BYTES = 512
 
 DELAY_AFTER_RECEIVE = 0.05
 LOOP_IN_MS = 10
@@ -80,6 +80,7 @@ def frame_02():
     buff = bytearray(b'\x31\xFE')
     buff.append(2)
     buff.append(0)
+    buff.append(0)
     crc = AddCrc(buff)
     buff.append(crc)
     print("Data->TX {0}".format(buff.hex().upper()))
@@ -90,6 +91,7 @@ def frame_09():
     buff = bytearray(b'\x31\xFE')
     buff.append(9)
     buff.append(0)
+    buff.append(0)
     crc = AddCrc(buff)
     buff.append(crc)
     print("Data->TX {0}".format(buff.hex().upper()))
@@ -98,10 +100,14 @@ def frame_09():
 def frame_04_writeRecordToFlash(recordIdx,size ,data):
     buff = bytearray(b'\x31\xFE')
     buff.append(WRITE_FOTA_RECORD)
-    buff.append(size+3)
+    
+    buff.append((size+4)&0xFF)
+    buff.append(((size+4)>>8)&0xFF)
+    
     buff.append(recordIdx & 0xFF)
     buff.append((recordIdx >> 8) & 0xFF)
-    buff.append(size)
+    buff.append((size)&0xFF)
+    buff.append((size>>8)&0xFF)
     
     for b in data:
         buff.append(b)
@@ -115,6 +121,7 @@ def frame_11_writeFotaHeader(version):
     buff = bytearray(b'\x31\xFE')
     buff.append(WRITE_FOTA_HEADER)
     buff.append(3)
+    buff.append(0)
     buff.append(version[0])
     buff.append(version[1])
     buff.append(version[2])
@@ -162,12 +169,15 @@ def readSerial(ser, serialQ):
 
 def isPackedValid(data):
     
-    if len(data) < 5:
+    if len(data) < 6:
         return False
-    if len(data) < data[3]+5:
+    
+    #print("LENGHT: {0}".format(((data[4]<<8) | data[3])+6))
+    if len(data) < (((data[4]<<8) | data[3])+6):
         return False
-    if len(data) < data[3]+3:
+    if len(data) < (((data[4]<<8) | data[3])+3):
         return False
+    #print("LENGHT2: {0}".format(((data[4]<<8) | data[3])+3))
     if data[0] != 0x31:
         return False 
     
@@ -178,25 +188,25 @@ def isBuildAckFrame(data):
         return True
     return False
 def isSwticToSlavedAckFrame(data):
-    if data[2] == 3 and data[4] == 2 :
+    if data[2] == 3 and data[5] == 2 :
         return True
     return False
 
 def isWriteRecorddAckFrame(data):
-    if data[2] == 5 and data[4] == 4 :
+    if data[2] == 5 and data[5] == 4 :
         return True
     return False
       
 def packetCrcCheck(data):
     crc = 0x0000
-    for n in data[2:data[3]+4]:  
+    for n in data[2:data[3]+5]:  
       crc = crc ^ (n << 8) 
       for bitnumber in range(0,8):
         if crc & 0x8000 : 
             crc =  crc  ^  (0x1070 << 3)
         crc = ( crc << 1 )
     crc = crc >> 8
-    if crc & 0xFF == data[data[3]+4]:
+    if crc & 0xFF == data[data[3]+5]:
         return True
     else:
         return False
@@ -206,7 +216,7 @@ def switchToFwUpdate():
     while True:
         frame_BOOT_Commanded()
         try:
-            data = getDataFromSerialWithTimeout(0.1)
+            data = getDataFromSerialWithTimeout(0.2)
             print("data")
             if isPackedValid(data):
                return True 
@@ -230,8 +240,8 @@ def getBuild():
         tryCount = tryCount - 1
         if isPackedValid(data):
              if isBuildAckFrame(data):
-                 print("Build {0}".format(data[4:data[3]+3]))
-                 fwBuild = "{0}".format(data[4:data[3]+3])
+                 print("Build {0}".format(data[5:((data[4]<<8) | data[3])+3]))
+                 fwBuild = "{0}".format(data[5:((data[4]<<8) | data[3])+3])
                  break
         else:
             print("Packet ERROR")
@@ -265,7 +275,7 @@ def waitWriteRecordAck(idx):
         print("Data->RX {0}".format(data.hex().upper()))
         if isPackedValid(data):
            if isWriteRecorddAckFrame(data):
-               idxAck = (data[6]<<8) + data[5]
+               idxAck = (data[7]<<8) + data[6]
                if idxAck == idx:
                    return True
         return False
@@ -350,19 +360,19 @@ def getDataFromSensor(win):
         if isPackedValid(data):
            #print("Data->RX {0}".format(data.hex().upper())) 
            if data [2] == PERIODIC_DATA_RESPONCE:
-               print("Temp: {0}; TempStatus: {1}; Photo: {2}; CAP1: {3}pF; CAP2: {4}pF; Level1: {5}; Level2: {6}".format(data[4], data[5], data[6], data[7]<<8 |data[8], data[9]<<8|data[10], data[13]<<8|data[14], data[15]<<8|data[16]))
-               dataMap["Cap1"] = data[7] << 8 | data[8]
-               dataMap["Cap2"] = data[9]<<8 | data[10]
-               dataMap["level1"] = data[13]<<8 | data[14]
-               dataMap["level2"] = data[15]<<8 | data[16]
-               if data[4] & 0x80:
-                  dataMap["Temp"] = (data[4]-2) * (-1)
+               print("Temp: {0}; TempStatus: {1}; Photo: {2}; CAP1: {3}pF; CAP2: {4}pF; Level1: {5}; Level2: {6}".format(data[5], data[6], data[7], data[8]<<8 |data[9], data[10]<<8|data[11], data[14]<<8|data[15], data[16]<<8|data[17]))
+               dataMap["Cap1"] = data[8] << 8 | data[9]
+               dataMap["Cap2"] = data[10]<<8 | data[11]
+               dataMap["level1"] = data[14]<<8 | data[15]
+               dataMap["level2"] = data[16]<<8 | data[17]
+               if data[5] & 0x80:
+                  dataMap["Temp"] = (data[5]-2) * (-1)
                else:
-                  dataMap["Temp"] = data[4]      
+                  dataMap["Temp"] = data[5]      
                
                
-               dataMap["Photo"] = data[6]
-               dataMap["TempError"] = data[5]
+               dataMap["Photo"] = data[7]
+               dataMap["TempError"] = data[6]
                  
                
         return True 
@@ -518,6 +528,7 @@ def animate(value, xs, ys):
     #print("PLOTING")
 
 def updateThread(filePathName, win, bootMode):  
+    global updateInProgress
     print("Start Fw Update process...")
     if bootMode:
         switchToFwUpdate()
@@ -525,6 +536,7 @@ def updateThread(filePathName, win, bootMode):
     getBuild() 
     switchToSlaveMode()
     fwUploadTask(False, filePathName, win)
+    updateInProgress = False
           
 def updateValues(win):
     global fwBuild
@@ -565,7 +577,9 @@ def main():
     global progress
     global fwVersion
     global fwBuild
+    global updateInProgress
     
+    updateInProgress= False
     fwVersion = "____________"
     fwBuild = "_____________________"
     progress=0
@@ -637,14 +651,16 @@ def main():
         event, values = win.read(timeout = 0.2)
         win.FindElement('fwUpdateProgress').UpdateBar(progress, 100)
         win.FindElement('progress').Update("{0}%".format(progress))
-        if getDataFromSensor(win):
-            animate(dataMap["level1"], xs, ys)
-            if getBuildISAllowed:
-                getBuild()
-                getBuildISAllowed = False 
-            
-        updateValues(win)    
-            
+        
+        if not updateInProgress:
+            if getDataFromSensor(win):
+                animate(dataMap["level1"], xs, ys)
+                if getBuildISAllowed:
+                    getBuild()
+                    getBuildISAllowed = False 
+                
+            updateValues(win)    
+                
         # End program if user closes window or
         # presses the OK button
         #FuncAnimation(fig, update(i,n), interval=1) 
@@ -653,6 +669,7 @@ def main():
         elif event == "UPDATE":
             print("UPDATE: {0}".format(values["-FILE-"]))
             progress=0
+            updateInProgress = True
             t2 = threading.Thread(target = updateThread, args=[values["-FILE-"], win, values["boot-checkbox"]])
             t2.start() 
         elif event == "CONNECT":
