@@ -28,6 +28,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 import numpy as np
 import datetime as dt
+import struct
 
 #from Tkinter import *
 
@@ -131,6 +132,30 @@ def frame_11_writeFotaHeader(version):
     print("Data->TX {0}".format(buff.hex().upper()))
     serTerminal.write(buff)    
 
+# get config
+def frame_06():
+    buff = bytearray(b'\x31\xFE')
+    buff.append(6)
+    buff.append(0)
+    buff.append(0)
+    crc = AddCrc(buff)
+    buff.append(crc)
+    print("Data->TX {0}".format(buff.hex().upper()))
+    serTerminal.write(buff)    
+
+def frame_08(data):
+    buff = bytearray(b'\x31\xFE')
+    buff.append(8)
+    buff.append(10)
+    buff.append(0)
+    
+    for i in range(0,10):
+        buff.append(data[i])
+    
+    crc = AddCrc(buff)
+    buff.append(crc)
+    print("Data->TX {0}".format(buff.hex().upper()))
+    serTerminal.write(buff)    
 
 def getDataFromSerial():
     data = serialQ.get()
@@ -187,6 +212,12 @@ def isBuildAckFrame(data):
     if data[2] == 10:
         return True
     return False
+
+def isGetConfigFrame(data):
+    if data[2] == 7:
+        return True
+    return False
+
 def isSwticToSlavedAckFrame(data):
     if data[2] == 3 and data[5] == 2 :
         return True
@@ -194,6 +225,10 @@ def isSwticToSlavedAckFrame(data):
 
 def isWriteRecorddAckFrame(data):
     if data[2] == 5 and data[5] == 4 :
+        return True
+    return False
+def isWriteConfigAckFrame(data):
+    if data[2] == 3 and data[5] == 8 :
         return True
     return False
       
@@ -209,6 +244,93 @@ def packetCrcCheck(data):
     if crc & 0xFF == data[data[3]+5]:
         return True
     else:
+        return False
+
+def setConfig(win, sensorLength, level, sendPeriod):
+    win.FindElement('configProgress').UpdateBar(0, 20)
+    win.FindElement('configStatus').Update("Writing...       ")
+    buff = bytearray(b'\x00\x00\x00\x00')
+    print("setConfig: {0}".format(sensorLength))
+    struct.pack_into('f', buff, 0,float(sensorLength))
+    print("",buff[0],buff[1],buff[2],buff[3])
+    
+    #----- Sensor Leght ------
+    configBuf[6] = buff [3]
+    configBuf[7] = buff [2]
+    configBuf[8] = buff [1]
+    configBuf[9] = buff [0]
+    
+    configBuf[0] = (int(sendPeriod) >> 8)&0xFF
+    configBuf[1] = int(sendPeriod)&0xFF
+    
+    
+    frame_08(configBuf)
+    
+    try:
+        data = getDataFromSerialWithTimeout(0.5)
+        print("data")
+        if isPackedValid(data):
+            if isWriteConfigAckFrame(data):
+                print("Write OK")
+                win.FindElement('configProgress').UpdateBar(20, 20)
+                win.FindElement('configStatus').Update("Write OK       ")
+            
+    except :
+        print("Timeout")
+        win.FindElement('configStatus').Update("Write ERROR  ")
+ 
+def fromByteArrayToFloat(data):
+     
+      bytestoFloat = bytearray()
+      bytestoFloat.append(data[3])
+      bytestoFloat.append(data[2])
+      bytestoFloat.append(data[1])
+      bytestoFloat.append(data[0])
+      tup = struct.unpack('f',bytestoFloat)
+      return tup [0] 
+    
+def getConfig(win):
+    global configBuf
+    win.FindElement('configProgress').UpdateBar(0, 20)
+    win.FindElement('configStatus').Update("Reading...       ")
+    
+    #getAnyFromRS485()
+    frame_06()
+   
+       
+    try:
+        data = getDataFromSerialWithTimeout(10)
+    
+        if isPackedValid(data):
+           if isGetConfigFrame(data):
+              
+              
+               for i in range(0,10):
+                   configBuf[i] = data [i+5]
+              
+               
+               dataMap["Sensor-Lenght"] = fromByteArrayToFloat(data[11:15])
+               dataMap["Level-TH"] = fromByteArrayToFloat(data[7:11])
+               
+               dataMap["Send-Interval"] = data[5]<<8 | data[6]
+               
+               #print("Converted= {0}".format(struct.unpack('f',b'\x00\x80\x27\x44')));
+               print("Converted= {0}".format(dataMap["Sensor-Lenght"]))
+               
+               win.FindElement("-sensor-lenght-").Update("{:0.0f}".format(dataMap["Sensor-Lenght"] ))
+               win.FindElement("-Level-").Update("{:0.0f}".format(dataMap["Level-TH"] ))
+               
+               win.FindElement("-Send-Interval-").Update("{0}".format(dataMap["Send-Interval"]))
+              
+               
+              
+               win.FindElement('configProgress').UpdateBar(20, 20)
+               win.FindElement('configStatus').Update("Read OK")
+        return True 
+    except:
+      
+        print("Timeout")
+        win.FindElement('configStatus').Update("Read ERROR  ")
         return False
 
 def switchToFwUpdate():
@@ -391,7 +513,7 @@ def draw_figure(canvas, figure):
     figure_canvas_agg.get_tk_widget().pack(side="top", fill="both", expand=1)
     return figure_canvas_agg                        
 
-def windows_ini():
+def windows_ini(width, high):
     matplotlib.use("TkAgg")
     frame2_layout = [
         [sg.Text("                                                          ")],
@@ -426,23 +548,49 @@ def windows_ini():
                             [sg.ProgressBar(orientation="vertical",max_value=100,size=(20, 20)), sg.Canvas(key="-CANVAS2-")],
                            
                            
-                         ]
+                            ]
     
- 
+    tab_layout = [
+        [sg.Column(information_column2_1)]
+        
+        ]
+    tab_layout_config = [
+        [sg.Text("Sensor lenght: "), sg.Input(size=(5, 1),  key = "-sensor-lenght-"),sg.Text("mm")],
+        [sg.Text("Trigger Level:  "), sg.Input(size=(5, 1),  key = "-Level-"),sg.Text("%")],
+        [sg.Text("Send Interval:  "), sg.Input(size=(5, 1),  key = "-Send-Interval-"),sg.Text("s")],
+        
+        [sg.Text("Status:"), sg.Text("                 ", key = "configStatus")],
+        [sg.ProgressBar(max_value=10,size=(20, 5), key="configProgress")],
+        [sg.Text("  ")],
+        [sg.Button("READ", key = "-read-button-"), sg.Button("WRITE", key = "-write-button-")]
+        ]
+      
+    tab_control = [
+                    [sg.Tab("Info", layout= tab_layout)],
+                    [sg.Tab("Config", layout= tab_layout_config)]
+                  ]
+    
+    infeomation_col = [[sg.Frame(layout = information_column, title="frame1",  vertical_alignment = "top", key= "frame1")]]
     
     layout = [ 
-                [sg.Frame(layout = information_column, title="frame1",  vertical_alignment = "top", key= "frame1"),sg.Column(information_column2_1)] ,
+                [sg.Column(infeomation_col,vertical_alignment = "top", background_color = "red"), sg.Column([[sg.TabGroup(tab_control)]],size =(width, high-200), vertical_alignment = "top", background_color = "red")] ,
+                
+               
                 
                
                
              ]
+   
+ 
+    
+    
 
     #x=np.array ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
     #y= np.array ([0,10,20,30,40,50,60,70,80,90,100])
     print("Starting")
     
      # Create the window
-    window = sg.Window("EFLS-D2 Test " + version, layout, size=(1360,768),finalize=True,
+    window = sg.Window("EFLS-D2 Test " + version, layout, size=(width, high),finalize=True,
     element_justification="left",
     font="Helvetica 12",)
     return window
@@ -557,6 +705,8 @@ def updateValues(win):
     win.FindElement("-build-").Update(fwBuild)
     
     
+     
+    
     
 def main():
 
@@ -578,14 +728,16 @@ def main():
     global fwVersion
     global fwBuild
     global updateInProgress
+    global configBuf
     
+    configBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
     updateInProgress= False
     fwVersion = "____________"
     fwBuild = "_____________________"
     progress=0
-    dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0}
+    dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0, "Sensor-Lenght":0.0, "Level-TH":0.0, "Send-Interval":0}
    
-    win = windows_ini()
+    win = windows_ini(1360,768)
     br = plot_ini(win)
     bootForce = False
     test_mode = False
@@ -677,10 +829,14 @@ def main():
             openPortThread(serialQ, values["boot-checkbox"], values["port-list"])
             print("CheckBox status: {0}".format(values["boot-checkbox"]))
             print("Com Port: {0}".format(values["port-list"]))
-    
-        
+        elif event == "-read-button-":
+            print("Read Setting")
+            getConfig(win)
+        elif event == "-write-button-":
+            print("Write Setting")
+            setConfig(win, values["-sensor-lenght-"], values ["-Level-"], values["-Send-Interval-"])
             
-            
+           
         #br = draw_figure(window["-CANVAS-"].TKCanvas, fig)
       #  a.show()
         br.draw()
