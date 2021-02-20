@@ -498,7 +498,7 @@ def getDataFromSensor(win):
         if isPackedValid(data):
            #print("Data->RX {0}".format(data.hex().upper())) 
            if data [2] == PERIODIC_DATA_RESPONCE:
-               print("Temp: {0}; TempStatus: {1}; Photo: {2}; CAP1: {3}pF; CAP2: {4}pF; Level1: {5}; Level2: {6}".format(data[5], data[6], data[7], data[8]<<8 |data[9], data[10]<<8|data[11], data[14]<<8|data[15], data[16]<<8|data[17]))
+               
                dataMap["Cap1"] = data[8] << 8 | data[9]
                dataMap["Cap2"] = data[10]<<8 | data[11]
                dataMap["level1"] = data[14]<<8 | data[15]
@@ -511,6 +511,8 @@ def getDataFromSensor(win):
                
                dataMap["Photo"] = data[7]
                dataMap["TempError"] = data[6]
+               
+               print("Temp: {0}; TempStatus: {1}; Photo: {2}; CAP1: {3}pF; CAP2: {4}pF; Level1: {5}; Level2: {6}".format(data[5], data[6], data[7], data[8]<<8 |data[9], data[10]<<8|data[11],  dataMap["level1"], data[16]<<8|data[17]))
                  
                
         return True 
@@ -559,9 +561,9 @@ def windows_ini(width, high):
    
     
     information_column2_1 = [
-                            [sg.ProgressBar(orientation="vertical",max_value=10,size=(20, 20)), sg.Canvas(key="-CANVAS-")],
+                            [sg.ProgressBar(orientation="vertical",max_value=100,size=(20, 20), key ="levelBar1"), sg.Canvas(key="-CANVAS-")],
                            
-                            [sg.ProgressBar(orientation="vertical",max_value=100,size=(20, 20)), sg.Canvas(key="-CANVAS2-")],
+                            [sg.ProgressBar(orientation="vertical",max_value=100,size=(20, 20), key ="levelBar2"), sg.Canvas(key="-CANVAS2-")],
                            
                            
                             ]
@@ -884,6 +886,9 @@ def main():
             if getDataFromSensor(win):
                 animate(dataMap["level1"], xs, ys)
                 animate2(dataMap["level2"], xs2, ys2)
+                
+                win.FindElement('levelBar1').UpdateBar(dataMap["level1"]/10.0, 100)
+                win.FindElement('levelBar2').UpdateBar(dataMap["level2"]/10.0, 100)
                 if getBuildISAllowed:
                     if getBuild():
                         getBuildISAllowed = False 
