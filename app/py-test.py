@@ -183,13 +183,15 @@ def readSerial(ser, serialQ):
     global stop_threads
     
     while (ser.isOpen()):
+        if stop_threads:
+            break  
+        
         rawdata = ser.read(256)
         
         if rawdata:
             serialQ.put(rawdata)
            
-        if stop_threads:
-            break    
+          
         time.sleep(1/LOOP_IN_MS) #delay 50mS
 
 def isPackedValid(data):
@@ -352,22 +354,29 @@ def getBuild():
     global fwBuild
     tryCount = 3
     while(tryCount):
-        getAnyFromRS485()
-        time.sleep(DELAY_AFTER_RECEIVE) #delay 
+        #getAnyFromRS485()
+        #time.sleep(DELAY_AFTER_RECEIVE) #delay 
         frame_09()
-        data = getDataFromSerial()
-        print("Data->RX {0}".format(data.hex().upper()))
-      
-      
-        tryCount = tryCount - 1
-        if isPackedValid(data):
-             if isBuildAckFrame(data):
-                 print("Build {0}".format(data[5:((data[4]<<8) | data[3])+3]))
-                 fwBuild = "{0}".format(data[5:((data[4]<<8) | data[3])+3])
-                 break
-        else:
-            print("Packet ERROR")
-            
+        try:
+            data = getDataFromSerialWithTimeout(0.5)
+            if data:
+                
+                print("Data->RX {0}".format(data.hex().upper()))
+              
+              
+                tryCount = tryCount - 1
+                if isPackedValid(data):
+                     if isBuildAckFrame(data):
+                         print("Build {0}".format(data[5:((data[4]<<8) | data[3])+3]))
+                         fwBuild = "{0}".format(data[5:((data[4]<<8) | data[3])+3])
+                         return True
+                else:
+                    print("Packet ERROR")
+            else:
+                break  
+        except:
+            break          
+    return False            
 
 def switchToSlaveMode():
         
@@ -393,7 +402,7 @@ def switchToSlaveMode():
             
 def waitWriteRecordAck(idx):
     try:
-        data = getDataFromSerialWithTimeout(0.5)
+        data = getDataFromSerialWithTimeout(2)
         print("Data->RX {0}".format(data.hex().upper()))
         if isPackedValid(data):
            if isWriteRecorddAckFrame(data):
@@ -434,6 +443,7 @@ def getVersionFromFileName(fileName):
         
 def fwUploadTask(updateFotaHeaderOnly, filePath, win):
     global progress
+    global updateTaskTerminat
     print("Opne file")
     fileName = getBinFile(filePath)
     if filePath != "":
@@ -446,12 +456,17 @@ def fwUploadTask(updateFotaHeaderOnly, filePath, win):
                 print("File found: {0} szie {1}".format(fileName, fileSize))
                 file.seek(0)      
                 while True:
+                    if updateTaskTerminat:
+                        progress=0 
+                        break
                     data = file.read(FOTA_BLOCK_SZIE_IN_BYTES)
                     if data:
                         writeOk = False
                         
                         while not writeOk:
-                                
+                            if updateTaskTerminat:
+                                progress=0 
+                                break    
                             frame_04_writeRecordToFlash(recordIdx, len(data), data)
                             if waitWriteRecordAck(recordIdx):
                                writeOk = True
@@ -469,6 +484,7 @@ def fwUploadTask(updateFotaHeaderOnly, filePath, win):
                         frame_11_writeFotaHeader(version)   
                         waitAckPacket()
                         break
+                  
         else:
             version = getVersionFromFileName(fileName)    
             frame_11_writeFotaHeader(version)   
@@ -518,14 +534,14 @@ def windows_ini(width, high):
     frame2_layout = [
         [sg.Text("                                                          ")],
         [sg.Text("Choose a file: "), sg.FileBrowse("File", key="-FILE-")],
-        [sg.Button("UPDATE")],
+        [sg.Button("UPDATE"), sg.Button("STOP")],
         [sg.ProgressBar(orientation="horizontal",max_value=10,size=(10, 20), key = "fwUpdateProgress"), sg.Text("0%  ", key = "progress")],
         ]
     information_column = [
                             [sg.Checkbox("Boot Only", key = "boot-checkbox"), sg.Combo("",size =(10,1), key = "port-list")],
-                            [sg.Button("CONNECT")],
+                            [sg.Button("CONNECT"), sg.Button("RE-CONNECT")],
                             [sg.Text("Fw Version:"), sg.Text("____________", key="-version-") ],
-                            [sg.Text("Build:"), sg.Text("______________________________", key = "-build-")],
+                            [sg.Text("Build:"), sg.Text("__________________________________", key = "-build-")],
                             [sg.HSeparator(color = "White"),],
                             [sg.Text("                                                          ")],
                             [sg.Text("Temp:"),sg.Text("####", key="-temp-") ],
@@ -573,7 +589,7 @@ def windows_ini(width, high):
     infeomation_col = [[sg.Frame(layout = information_column, title="frame1",  vertical_alignment = "top", key= "frame1")]]
     
     layout = [ 
-                [sg.Column(infeomation_col,vertical_alignment = "top", background_color = "red"), sg.Column([[sg.TabGroup(tab_control)]],size =(width, high-200), vertical_alignment = "top", background_color = "red")] ,
+                [sg.Column(infeomation_col,vertical_alignment = "top", background_color = "red"), sg.Column([[sg.TabGroup(tab_control)]],size =(width, high-100), vertical_alignment = "top", background_color = "red")] ,
                 
                
                 
@@ -601,6 +617,7 @@ def plot_ini(window):
     fig = Figure(figsize=(4.9,2.9))
     subPlot = fig.add_subplot(111)
     subPlot.axis([0, 10, 0, 100])
+    
     #a.scatter(100,10,color='red')
     #a.plot(p, range(2 +max(x)),color='blue')
     #a.invert_yaxis()
@@ -608,13 +625,24 @@ def plot_ini(window):
     subPlot.set_title ("CAP1", fontsize=16)
     subPlot.set_ylabel("Y", fontsize=14)
     subPlot.set_xlabel("t", fontsize=14)
+    
+     
     br = draw_figure(window["-CANVAS-"].TKCanvas, fig)
     return br
-   
-    ##draw_figure(window["-CANVAS2-"].TKCanvas, fig2)
-    # Create an event loop
-   
-  
+def plot2_ini(window):
+    global fig2
+    global subPlot2
+    
+    
+    fig2 = Figure(figsize=(4.9,2.9))
+    subPlot2 = fig2.add_subplot(111)
+    subPlot2.axis([0, 10, 0, 100])   
+    
+    subPlot2.set_title ("CAP2", fontsize=16)
+    subPlot2.set_ylabel("Y", fontsize=14)
+    subPlot2.set_xlabel("t", fontsize=14) 
+    br = draw_figure(window["-CANVAS2-"].TKCanvas, fig2)
+    return br
     
 
 
@@ -668,15 +696,50 @@ def animate(value, xs, ys):
     subPlot.clear()
     subPlot.plot(xs, ys)
 
+    subPlot.set_title ("CAP1", fontsize=16)
+    subPlot.set_ylabel("Y", fontsize=14)
+    subPlot.set_xlabel("t", fontsize=14)
+    
     # Format plot
-    plt.xticks(rotation=45, ha='right')
-    plt.subplots_adjust(bottom=0.30)
-    plt.title('TMP102 Temperature over Time')
-    plt.ylabel('Temperature (deg C)')
+    #plt.xticks(rotation=45, ha='right')
+    #plt.subplots_adjust(bottom=0.30)
+    #plt.title('TMP102 Temperature over Time')
+    #plt.ylabel('Temperature (deg C)')
+
+def animate2(value, xs, ys):
+    global subPlot2
+    global xIdx2
+    # Read temperature (Celsius) from TMP
+    
+
+    # Add x and y to lists
+    xIdx2 = xIdx2 + 1
+    xs.append(xIdx2)
+    ys.append(value)
+
+    # Limit x and y lists to 20 items
+    xs = xs[-10:]
+    ys = ys[-10:]
+
+    # Draw x and y lists
+    subPlot2.clear()
+    subPlot2.plot(xs, ys)
+    
+    subPlot2.set_title ("CAP2", fontsize=16)
+    subPlot2.set_ylabel("Y", fontsize=14)
+    subPlot2.set_xlabel("t", fontsize=14)
+    # Format plot
+    #plt.xticks(rotation=45, ha='right')
+    #plt.subplots_adjust(bottom=0.30)
+    #plt.title('TMP102 Temperature over Time')
+    #plt.ylabel('Temperature (deg C)')    
+    
+    
     #print("PLOTING")
 
 def updateThread(filePathName, win, bootMode):  
     global updateInProgress
+    global updateTaskTerminat
     print("Start Fw Update process...")
     if bootMode:
         switchToFwUpdate()
@@ -721,15 +784,20 @@ def main():
     global test_mode
     global fig
     global subPlot
+    global fig2
+    global subPlot2
     global port_connected
     global xIdx
+    global xIdx2
     global dataMap
     global progress
     global fwVersion
     global fwBuild
     global updateInProgress
     global configBuf
+    global updateTaskTerminat
     
+    updateTaskTerminat = False
     configBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
     updateInProgress= False
     fwVersion = "____________"
@@ -739,6 +807,8 @@ def main():
    
     win = windows_ini(1360,768)
     br = plot_ini(win)
+    br2 = plot2_ini(win)
+    
     bootForce = False
     test_mode = False
     boudRate = RS485_BOUD_RATE_APP
@@ -768,9 +838,11 @@ def main():
        
        time.sleep(1)  
        
-    ports = serial.tools.list_ports.comports() 
-    print([port.device for port in ports])
-    win.find_element("port-list").update(values = [port.device for port in ports])
+    #ports = serial.tools.list_ports.comports() 
+    #win.find_element("port-list").update(values = [port.device for port in ports])
+    win.find_element("port-list").update(values = ['COM2'])
+    #print([port.device for port in ports])
+    
     #else:
       
            
@@ -795,6 +867,10 @@ def main():
     xs = []
     ys = []
     xIdx = 0
+    
+    xs2 = []
+    ys2 = []
+    xIdx2 = 0
     #ani = animation.FuncAnimation(fig, animate, fargs=(xs, ys), interval=1000)
     plt.show()
     #win.FindElement("UPDATE").Update(disabled=True)
@@ -807,9 +883,10 @@ def main():
         if not updateInProgress:
             if getDataFromSensor(win):
                 animate(dataMap["level1"], xs, ys)
+                animate2(dataMap["level2"], xs2, ys2)
                 if getBuildISAllowed:
-                    getBuild()
-                    getBuildISAllowed = False 
+                    if getBuild():
+                        getBuildISAllowed = False 
                 
             updateValues(win)    
                 
@@ -822,6 +899,7 @@ def main():
             print("UPDATE: {0}".format(values["-FILE-"]))
             progress=0
             updateInProgress = True
+            updateTaskTerminat = False
             t2 = threading.Thread(target = updateThread, args=[values["-FILE-"], win, values["boot-checkbox"]])
             t2.start() 
         elif event == "CONNECT":
@@ -835,22 +913,34 @@ def main():
         elif event == "-write-button-":
             print("Write Setting")
             setConfig(win, values["-sensor-lenght-"], values ["-Level-"], values["-Send-Interval-"])
-            
-           
+        elif event == "STOP":  
+            updateTaskTerminat = True  
+            progress=0
+        elif event == "RE-CONNECT":
+            stop_threads = True
+            updateTaskTerminat = True
+            time.sleep(0.3) #delay 
+            serTerminal.close()  
+            port_connected = False
+            stop_threads = False
+            updateTaskTerminat = False
+            openPortThread(serialQ, values["boot-checkbox"], values["port-list"])
+            print("CheckBox status: {0}".format(values["boot-checkbox"]))
+            print("Com Port: {0}".format(values["port-list"]))  
+               
         #br = draw_figure(window["-CANVAS-"].TKCanvas, fig)
       #  a.show()
         br.draw()
+        br2.draw()
        # br.draw()
         #plt.pause(5)
-        i = i +1
-        
-        if i > 100:
-            i=0
-            n = n +5
-        
-        #if event == "OK" or event == sg.WIN_CLOSED:
-         #   break
-
+       
+        if event == "OK" or event == sg.WIN_CLOSED:
+            
+          break
+    stop_threads = True
+    updateTaskTerminat = True
+    serTerminal.close()  
     win.close()        
     
 
