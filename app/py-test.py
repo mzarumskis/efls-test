@@ -29,6 +29,7 @@ from matplotlib.figure import Figure
 import numpy as np
 import datetime as dt
 import struct
+from numpy.lib.function_base import rot90
 
 #from Tkinter import *
 
@@ -53,6 +54,8 @@ RS485_BOUD_RATE_APP = 19200
 WRITE_FOTA_RECORD = 4
 WRITE_FOTA_HEADER = 11
 
+comunicationType = {"MASTER":0,"SLAVE":1}
+
 def open_serial(port, boudR):
     ser = serial.Serial(port, boudR, timeout=0.1)
     return ser
@@ -75,7 +78,17 @@ def frame_BOOT_Commanded():
     print("Data->TX {0}".format(buff.hex().upper()))
     serTerminal.write(buff) 
      
-    
+
+def frame_14():
+    buff = bytearray(b'\x31\xFE')
+    buff.append(14)
+    buff.append(0)
+    buff.append(0)
+    crc = AddCrc(buff)
+    buff.append(crc)
+    print("Data->TX {0}".format(buff.hex().upper()))
+    serTerminal.write(buff)    
+        
 # switch to SLAVE mode
 def frame_02():
     buff = bytearray(b'\x31\xFE')
@@ -146,10 +159,10 @@ def frame_06():
 def frame_08(data):
     buff = bytearray(b'\x31\xFE')
     buff.append(8)
-    buff.append(10)
+    buff.append(11)
     buff.append(0)
     
-    for i in range(0,10):
+    for i in range(0,11):
         buff.append(data[i])
     
     crc = AddCrc(buff)
@@ -248,7 +261,7 @@ def packetCrcCheck(data):
     else:
         return False
 
-def setConfig(win, sensorLength, level, sendPeriod):
+def setConfig(win, sensorLength, level, sendPeriod, mode):
     win.FindElement('configProgress').UpdateBar(0, 20)
     win.FindElement('configStatus').Update("Writing...       ")
     buff = bytearray(b'\x00\x00\x00\x00')
@@ -256,15 +269,18 @@ def setConfig(win, sensorLength, level, sendPeriod):
     struct.pack_into('f', buff, 0,float(sensorLength))
     print("",buff[0],buff[1],buff[2],buff[3])
     
-    #----- Sensor Leght ------
+    #----- Sensor Lenght ------
     configBuf[6] = buff [3]
     configBuf[7] = buff [2]
     configBuf[8] = buff [1]
     configBuf[9] = buff [0]
     
+    #Send Period
     configBuf[0] = (int(sendPeriod) >> 8)&0xFF
     configBuf[1] = int(sendPeriod)&0xFF
     
+    print("Mode set: {0}".format(comunicationType[mode]))
+    configBuf[10] = comunicationType[mode]
     
     frame_08(configBuf)
     
@@ -290,6 +306,12 @@ def fromByteArrayToFloat(data):
       bytestoFloat.append(data[0])
       tup = struct.unpack('f',bytestoFloat)
       return tup [0] 
+
+def getModeByEnum(mode):
+    for modeEnum in comunicationType:
+        if mode == comunicationType[modeEnum]:
+            return modeEnum
+    return ""    
     
 def getConfig(win):
     global configBuf
@@ -307,7 +329,7 @@ def getConfig(win):
            if isGetConfigFrame(data):
               
               
-               for i in range(0,10):
+               for i in range(0,11):
                    configBuf[i] = data [i+5]
               
                
@@ -315,6 +337,14 @@ def getConfig(win):
                dataMap["Level-TH"] = fromByteArrayToFloat(data[7:11])
                
                dataMap["Send-Interval"] = data[5]<<8 | data[6]
+               
+               dataMap["Mode"] = data[15]
+               
+               print("Mode= {0}".format(dataMap["Mode"] ))
+               print("Mode TXT= {0}".format(getModeByEnum(dataMap["Mode"]) ))
+               
+              
+               win.FindElement('Mode').Update(getModeByEnum(dataMap["Mode"])) 
                
                #print("Converted= {0}".format(struct.unpack('f',b'\x00\x80\x27\x44')));
                print("Converted= {0}".format(dataMap["Sensor-Lenght"]))
@@ -378,13 +408,16 @@ def getBuild():
             break          
     return False            
 
+def getDataFromSlave():
+    frame_14()
+
 def switchToSlaveMode():
         
     tryCount = 5
-    getAnyFromRS485()
+    #getAnyFromRS485()
     while(tryCount):
         
-        time.sleep(DELAY_AFTER_RECEIVE) #delay 
+        #time.sleep(DELAY_AFTER_RECEIVE) #delay 
         frame_02()
         try:
             data = getDataFromSerialWithTimeout(0.5)
@@ -553,17 +586,19 @@ def windows_ini(width, high):
                             [sg.Text("CAP1:"),sg.Text("####", key="-cap1-") ,sg.Text("pF")],
                             [sg.Text("CAP2:"),sg.Text("####", key="-cap2-") ,sg.Text("pF")],
                             [sg.Text("")],
-                             [sg.Text("Photo:"),sg.Text("ON", size = (6,1), key="-photo-") ],
-                           
+                            [sg.Text("Photo:"),sg.Text("ON", size = (6,1), key="-photo-") ],
+                            [sg.Button("READ", key = "getSlaveData")],                           
                             [sg.Text("")],
                             [sg.Frame(layout = frame2_layout,  title="FW")],
                          ]
    
     
     information_column2_1 = [
-                            [sg.ProgressBar(orientation="vertical",max_value=100,size=(20, 20), key ="levelBar1"), sg.Canvas(key="-CANVAS-")],
+                            [sg.Text("___", key="Bar1Value")],
+                            [sg.ProgressBar(orientation="vertical",max_value=100,size=(20, 25), key ="levelBar1"), sg.Canvas(key="-CANVAS-")],
                            
-                            [sg.ProgressBar(orientation="vertical",max_value=100,size=(20, 20), key ="levelBar2"), sg.Canvas(key="-CANVAS2-")],
+                            [sg.Text("___",key="Bar2Value" )],
+                            [sg.ProgressBar(orientation="vertical",max_value=100,size=(20, 25), key ="levelBar2"), sg.Canvas(key="-CANVAS2-")],
                            
                            
                             ]
@@ -576,6 +611,7 @@ def windows_ini(width, high):
         [sg.Text("Sensor lenght: "), sg.Input(size=(5, 1),  key = "-sensor-lenght-"),sg.Text("mm")],
         [sg.Text("Trigger Level:  "), sg.Input(size=(5, 1),  key = "-Level-"),sg.Text("%")],
         [sg.Text("Send Interval:  "), sg.Input(size=(5, 1),  key = "-Send-Interval-"),sg.Text("s")],
+        [sg.Text("MODE AT START:  "), sg.Combo(["MASTER", "SLAVE"],size =(10,1), key = "Mode")],
         
         [sg.Text("Status:"), sg.Text("                 ", key = "configStatus")],
         [sg.ProgressBar(max_value=10,size=(20, 5), key="configProgress")],
@@ -616,7 +652,7 @@ def windows_ini(width, high):
 def plot_ini(window):
     global fig
     global subPlot
-    fig = Figure(figsize=(4.9,2.9))
+    fig = Figure(figsize=(6.0,2.5))
     subPlot = fig.add_subplot(111)
     subPlot.axis([0, 10, 0, 100])
     
@@ -624,9 +660,9 @@ def plot_ini(window):
     #a.plot(p, range(2 +max(x)),color='blue')
     #a.invert_yaxis()
 
-    subPlot.set_title ("CAP1", fontsize=16)
-    subPlot.set_ylabel("Y", fontsize=14)
-    subPlot.set_xlabel("t", fontsize=14)
+    subPlot.set_title ("CAP1", fontsize=10)
+    subPlot.set_ylabel("Y", fontsize=8, rotation=180)
+    subPlot.set_xlabel("t", fontsize=8)
     
      
     br = draw_figure(window["-CANVAS-"].TKCanvas, fig)
@@ -636,13 +672,13 @@ def plot2_ini(window):
     global subPlot2
     
     
-    fig2 = Figure(figsize=(4.9,2.9))
+    fig2 = Figure(figsize=(6.0,2.5))
     subPlot2 = fig2.add_subplot(111)
     subPlot2.axis([0, 10, 0, 100])   
     
-    subPlot2.set_title ("CAP2", fontsize=16)
-    subPlot2.set_ylabel("Y", fontsize=14)
-    subPlot2.set_xlabel("t", fontsize=14) 
+    subPlot2.set_title ("CAP2", fontsize=10)
+    subPlot2.set_ylabel("Y", fontsize=8)
+    subPlot2.set_xlabel("t", fontsize=8) 
     br = draw_figure(window["-CANVAS2-"].TKCanvas, fig2)
     return br
     
@@ -698,9 +734,9 @@ def animate(value, xs, ys):
     subPlot.clear()
     subPlot.plot(xs, ys)
 
-    subPlot.set_title ("CAP1", fontsize=16)
-    subPlot.set_ylabel("Y", fontsize=14)
-    subPlot.set_xlabel("t", fontsize=14)
+    subPlot.set_title ("CAP1", fontsize=10)
+    subPlot.set_ylabel("Y", fontsize=8)
+    subPlot.set_xlabel("t", fontsize=8)
     
     # Format plot
     #plt.xticks(rotation=45, ha='right')
@@ -727,9 +763,9 @@ def animate2(value, xs, ys):
     subPlot2.clear()
     subPlot2.plot(xs, ys)
     
-    subPlot2.set_title ("CAP2", fontsize=16)
-    subPlot2.set_ylabel("Y", fontsize=14)
-    subPlot2.set_xlabel("t", fontsize=14)
+    subPlot2.set_title ("CAP2", fontsize=10)
+    subPlot2.set_ylabel("Y", fontsize=8)
+    subPlot2.set_xlabel("t", fontsize=8)
     # Format plot
     #plt.xticks(rotation=45, ha='right')
     #plt.subplots_adjust(bottom=0.30)
@@ -800,12 +836,12 @@ def main():
     global updateTaskTerminat
     
     updateTaskTerminat = False
-    configBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
+    configBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
     updateInProgress= False
     fwVersion = "____________"
     fwBuild = "_____________________"
     progress=0
-    dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0, "Sensor-Lenght":0.0, "Level-TH":0.0, "Send-Interval":0}
+    dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0, "Sensor-Lenght":0.0, "Level-TH":0.0, "Send-Interval":0, "Mode":-1}
    
     win = windows_ini(1360,768)
     br = plot_ini(win)
@@ -888,7 +924,11 @@ def main():
                 animate2(dataMap["level2"], xs2, ys2)
                 
                 win.FindElement('levelBar1').UpdateBar(dataMap["level1"]/10.0, 100)
+                win.FindElement('Bar1Value').Update("{0}".format(dataMap["level1"]/10.0))
+                
+                
                 win.FindElement('levelBar2').UpdateBar(dataMap["level2"]/10.0, 100)
+                win.FindElement('Bar2Value').Update("{0}".format(dataMap["level2"]/10.0))
                 if getBuildISAllowed:
                     if getBuild():
                         getBuildISAllowed = False 
@@ -917,7 +957,7 @@ def main():
             getConfig(win)
         elif event == "-write-button-":
             print("Write Setting")
-            setConfig(win, values["-sensor-lenght-"], values ["-Level-"], values["-Send-Interval-"])
+            setConfig(win, values["-sensor-lenght-"], values ["-Level-"], values["-Send-Interval-"], values["Mode"])
         elif event == "STOP":  
             updateTaskTerminat = True  
             progress=0
@@ -932,6 +972,8 @@ def main():
             openPortThread(serialQ, values["boot-checkbox"], values["port-list"])
             print("CheckBox status: {0}".format(values["boot-checkbox"]))
             print("Com Port: {0}".format(values["port-list"]))  
+        elif event == "getSlaveData":
+            getDataFromSlave()
                
         #br = draw_figure(window["-CANVAS-"].TKCanvas, fig)
       #  a.show()
