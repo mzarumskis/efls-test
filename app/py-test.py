@@ -523,6 +523,7 @@ def fwUploadTask(updateFotaHeaderOnly, filePath, win):
             frame_11_writeFotaHeader(version)   
 
 def getDataFromSensor(win):
+    global fwVersion
     dummy =""
    
     try:
@@ -544,6 +545,9 @@ def getDataFromSensor(win):
                
                dataMap["Photo"] = data[7]
                dataMap["TempError"] = data[6]
+               
+               fwVersion = "V{:02X}.{:02X}.{:02X}".format(data [18],data[19], data[20])
+             
                
                print("Temp: {0}; TempStatus: {1}; Photo: {2}; CAP1: {3}pF; CAP2: {4}pF; Level1: {5}; Level2: {6}".format(data[5], data[6], data[7], data[8]<<8 |data[9], data[10]<<8|data[11],  dataMap["level1"], data[16]<<8|data[17]))
                  
@@ -804,6 +808,8 @@ def updateValues(win):
     win.FindElement("-cap1-").Update("{0}".format(dataMap["Cap1"]))
     win.FindElement("-cap2-").Update("{0}".format(dataMap["Cap2"]))
     win.FindElement("-build-").Update(fwBuild)
+    win.FindElement("-version-").Update(fwVersion)
+    
     
     
      
@@ -841,7 +847,7 @@ def main():
     fwVersion = "____________"
     fwBuild = "_____________________"
     progress=0
-    dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0, "Sensor-Lenght":0.0, "Level-TH":0.0, "Send-Interval":0, "Mode":-1}
+    dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0, "Sensor-Lenght":0.0, "Level-TH":0.0, "Send-Interval":0, "Mode":-1, "fwVersion":""}
    
     win = windows_ini(1360,768)
     br = plot_ini(win)
