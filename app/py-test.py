@@ -397,8 +397,9 @@ def getBuild():
                 tryCount = tryCount - 1
                 if isPackedValid(data):
                      if isBuildAckFrame(data):
-                         print("Build {0}".format(data[5:((data[4]<<8) | data[3])+3]))
-                         fwBuild = "{0}".format(data[5:((data[4]<<8) | data[3])+3])
+                         buildDecode = data[5:((data[4]<<8) | data[3])+4]
+                         print("Build {:s}".format(buildDecode.decode('utf-8')))
+                         fwBuild = "{0}".format(buildDecode.decode('utf-8'))
                          return True
                 else:
                     print("Packet ERROR")
