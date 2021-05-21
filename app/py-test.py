@@ -159,10 +159,10 @@ def frame_06():
 def frame_08(data):
     buff = bytearray(b'\x31\xFE')
     buff.append(8)
-    buff.append(11)
+    buff.append(15)
     buff.append(0)
     
-    for i in range(0,11):
+    for i in range(0,15):
         buff.append(data[i])
     
     crc = AddCrc(buff)
@@ -261,7 +261,7 @@ def packetCrcCheck(data):
     else:
         return False
 
-def setConfig(win, sensorLength, level, sendPeriod, mode):
+def setConfig(win, sensorLength, level, sendPeriod, mode, boudRate):
     win.FindElement('configProgress').UpdateBar(0, 20)
     win.FindElement('configStatus').Update("Writing...       ")
     buff = bytearray(b'\x00\x00\x00\x00')
@@ -281,6 +281,13 @@ def setConfig(win, sensorLength, level, sendPeriod, mode):
     
     print("Mode set: {0}".format(comunicationType[mode]))
     configBuf[10] = comunicationType[mode]
+    
+    struct.pack_into('i', buff, 0,int(boudRate))
+    print("",buff[0],buff[1],buff[2],buff[3])
+    configBuf[11] = buff[3]
+    configBuf[12] = buff[2]
+    configBuf[13] = buff[1]
+    configBuf[14] = buff[0]
     
     frame_08(configBuf)
     
@@ -307,6 +314,16 @@ def fromByteArrayToFloat(data):
       tup = struct.unpack('f',bytestoFloat)
       return tup [0] 
 
+def fromByteArrayToInt(data):
+     
+      bytestoInt = bytearray()
+      bytestoInt.append(data[3])
+      bytestoInt.append(data[2])
+      bytestoInt.append(data[1])
+      bytestoInt.append(data[0])
+      tup = struct.unpack('i',bytestoInt)
+      return tup [0] 
+  
 def getModeByEnum(mode):
     for modeEnum in comunicationType:
         if mode == comunicationType[modeEnum]:
@@ -328,8 +345,8 @@ def getConfig(win):
         if isPackedValid(data):
            if isGetConfigFrame(data):
               
-              
-               for i in range(0,11):
+               print("Data->RX {0}".format(data.hex().upper()))
+               for i in range(0,15):
                    configBuf[i] = data [i+5]
               
                
@@ -340,11 +357,16 @@ def getConfig(win):
                
                dataMap["Mode"] = data[15]
                
+               dataMap["boudRate"] = fromByteArrayToInt(data[16:20])
+               
                print("Mode= {0}".format(dataMap["Mode"] ))
                print("Mode TXT= {0}".format(getModeByEnum(dataMap["Mode"]) ))
                
               
+              
                win.FindElement('Mode').Update(getModeByEnum(dataMap["Mode"])) 
+               
+               win.FindElement('-boudRate-').Update(dataMap["boudRate"]) 
                
                #print("Converted= {0}".format(struct.unpack('f',b'\x00\x80\x27\x44')));
                print("Converted= {0}".format(dataMap["Sensor-Lenght"]))
@@ -539,7 +561,7 @@ def getDataFromSensor(win):
                dataMap["level1"] = data[14]<<8 | data[15]
                dataMap["level2"] = data[16]<<8 | data[17]
                if data[5] & 0x80:
-                  dataMap["Temp"] = (data[5]-2) * (-1)
+                  dataMap["Temp"] = (256-data[5]) * (-1)
                else:
                   dataMap["Temp"] = data[5]      
                
@@ -575,7 +597,9 @@ def windows_ini(width, high):
         [sg.Text("                                                          ")],
         [sg.Text("Choose a file: "), sg.FileBrowse("File", key="-FILE-")],
         [sg.Button("UPDATE"), sg.Button("STOP")],
+        [sg.Button("RESET")],
         [sg.ProgressBar(orientation="horizontal",max_value=10,size=(10, 20), key = "fwUpdateProgress"), sg.Text("0%  ", key = "progress")],
+          [sg.Text("Level MinMax:"), sg.Text("                 ", key = "minMax")],
         ]
     information_column = [
                             [sg.Checkbox("Boot Only", key = "boot-checkbox"), sg.Combo("",size =(10,1), key = "port-list")],
@@ -617,11 +641,12 @@ def windows_ini(width, high):
         [sg.Text("Trigger Level:  "), sg.Input(size=(5, 1),  key = "-Level-"),sg.Text("%")],
         [sg.Text("Send Interval:  "), sg.Input(size=(5, 1),  key = "-Send-Interval-"),sg.Text("s")],
         [sg.Text("MODE AT START:  "), sg.Combo(["MASTER", "SLAVE"],size =(10,1), key = "Mode")],
-        
+        [sg.Text("RS485 Boud: "), sg.Input(size=(5, 1),  key = "-boudRate-")],
         [sg.Text("Status:"), sg.Text("                 ", key = "configStatus")],
         [sg.ProgressBar(max_value=10,size=(20, 5), key="configProgress")],
         [sg.Text("  ")],
-        [sg.Button("READ", key = "-read-button-"), sg.Button("WRITE", key = "-write-button-")]
+        [sg.Button("READ", key = "-read-button-"), sg.Button("WRITE", key = "-write-button-")],
+      
         ]
       
     tab_control = [
@@ -703,9 +728,9 @@ def openPortThread(serialQ, bootOnlyBoud, port):
     port_connected = False
     #ports = serial.tools.list_ports.comports()
     
-    boudRate = 19200
+    boudRate = RS485_BOUD_RATE_APP
     if bootOnlyBoud:
-       boudRate = 230400 
+       boudRate = RS485_BOUD_RATE_BOOT_ONLY 
     
    
     try:
@@ -734,10 +759,20 @@ def animate(value, xs, ys):
     # Limit x and y lists to 20 items
     xs = xs[-10:]
     ys = ys[-10:]
-
+    print(xs)
+    
+    if len(xs)< 10:
+        x_move = 10
+    else:
+        x_move = xs[9]       
+            
+    print(x_move)
     # Draw x and y lists
     subPlot.clear()
     subPlot.plot(xs, ys)
+    
+    
+    subPlot.axis([xs[0],x_move, 0, 100])
 
     subPlot.set_title ("CAP1", fontsize=10)
     subPlot.set_ylabel("Y", fontsize=8)
@@ -813,11 +848,13 @@ def updateValues(win):
     
     
     
-     
+
+MIN_MAX_DETECTION_LEVEL = 87.0     
     
     
 def main():
 
+#360
     global isSwitchedToFota
     global noPacketTimeout
     global frameErrorCounter
@@ -841,14 +878,18 @@ def main():
     global updateInProgress
     global configBuf
     global updateTaskTerminat
+    global minMax
+    global minMaxEnables 
     
+    minmax = [MIN_MAX_DETECTION_LEVEL,MIN_MAX_DETECTION_LEVEL]
     updateTaskTerminat = False
-    configBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
+    minMaxEnables = False
+    configBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
     updateInProgress= False
     fwVersion = "____________"
     fwBuild = "_____________________"
     progress=0
-    dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0, "Sensor-Lenght":0.0, "Level-TH":0.0, "Send-Interval":0, "Mode":-1, "fwVersion":""}
+    dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0, "Sensor-Lenght":0.0, "Level-TH":0.0, "Send-Interval":0, "Mode":-1, "fwVersion":"", "boudRate":0}
    
     win = windows_ini(1360,768)
     br = plot_ini(win)
@@ -927,7 +968,20 @@ def main():
         
         if not updateInProgress:
             if getDataFromSensor(win):
-                animate(dataMap["level1"], xs, ys)
+                
+                if minMaxEnables:
+                   if minmax[0]>  (dataMap["level1"]/10.0):
+                       minmax[0] = (dataMap["level1"]/10.0)
+                
+                   if minmax[1]<  (dataMap["level1"]/10.0):
+                       minmax[1] = (dataMap["level1"]/10.0)    
+                
+                if  (dataMap["level1"]/10.0) > MIN_MAX_DETECTION_LEVEL:
+                    minMaxEnables = True
+                
+                win.FindElement('minMax').Update("{0} {1}".format(minmax[0], minmax[1]))
+                      
+                animate(dataMap["level1"]/10.0, xs, ys)
                 animate2(dataMap["level2"], xs2, ys2)
                 
                 win.FindElement('levelBar1').UpdateBar(dataMap["level1"]/10.0, 100)
@@ -964,7 +1018,7 @@ def main():
             getConfig(win)
         elif event == "-write-button-":
             print("Write Setting")
-            setConfig(win, values["-sensor-lenght-"], values ["-Level-"], values["-Send-Interval-"], values["Mode"])
+            setConfig(win, values["-sensor-lenght-"], values ["-Level-"], values["-Send-Interval-"], values["Mode"], values["-boudRate-"])
         elif event == "STOP":  
             updateTaskTerminat = True  
             progress=0
@@ -981,6 +1035,9 @@ def main():
             print("Com Port: {0}".format(values["port-list"]))  
         elif event == "getSlaveData":
             getDataFromSlave()
+        elif event == "RESET":
+            minmax = [MIN_MAX_DETECTION_LEVEL,MIN_MAX_DETECTION_LEVEL]
+            minMaxEnables = False
                
         #br = draw_figure(window["-CANVAS-"].TKCanvas, fig)
       #  a.show()
