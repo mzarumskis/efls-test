@@ -16,10 +16,10 @@ FOTA_BLOCK_SZIE_IN_BYTES = 64
 BLOCK_BEFOR_CRC_ANDSIZE_BYTES = 192
 BOOT_RECORD_SIZE_BYTES = 16
 
-#DIR_ = "\Debug"
-DIR_ = ""
+DIR_ = "\Debug"
+#DIR_ = ""
 
-version = "V-0.0.1"
+version = "V-0.0.2"
 
 
       
@@ -59,12 +59,19 @@ def crc16(data : bytearray, offset , length, crcIni):
         
         
 def convertFile():
+    dir_path = os.path.dirname(os.path.realpath(__file__)) +DIR_
     crcOut = 0xFFFF
     print("Opne file")
     fileName = getBinFile()
+    print("File found: {0}".format(fileName))
     if fileName != "":
-   
-        file = open(fileName, "rb+")
+        
+      
+        outFileName = dir_path+"\FuelSensor_01.01.00.bin"    
+        fileOut = open(outFileName, "wb")
+        print("File to Out: {0}".format(outFileName))
+       
+        file = open(dir_path+"\\"+fileName, "rb+")
         recordIdx =0
         fileSize = len(file.read())
         print("File found: {0} szie {1}".format(fileName, fileSize))
@@ -95,11 +102,17 @@ def convertFile():
             
             file.seek(0)     
             file.write(outdata)
+            file.seek(0)     
+            
+            fileOut.seek(0)     
+            fileOut.write(file.read())
+            
             
             print("File CRC = {0}".format(hex(crcOut)))
                          
                              
-        file.close()   
+        file.close()  
+        fileOut.close() 
              
               
                                  

@@ -30,12 +30,16 @@ import numpy as np
 import datetime as dt
 import struct
 from numpy.lib.function_base import rot90
+from PIL.ImageEnhance import Color
+from PySimpleGUI.PySimpleGUI import theme_background_color
+#from builtins import False
 
 #from Tkinter import *
 
 version = "V-0.0.1"
 
 PERIODIC_DATA_RESPONCE = 1
+DEBUG_DATA_RESPONCE = 15
 
 FOTA_BLOCK_SZIE_IN_BYTES = 512
 
@@ -48,6 +52,8 @@ noPacketTimeout = 0
 frameErrorCounter = 0 
 RS485_BOUD_RATE_BOOT_ONLY = 230400
 RS485_BOUD_RATE_APP = 19200
+
+DEFAULT_PORT = 'COM5'
 
 #Command definitions
 
@@ -88,7 +94,16 @@ def frame_14():
     buff.append(crc)
     print("Data->TX {0}".format(buff.hex().upper()))
     serTerminal.write(buff)    
-        
+
+def frame_15():
+    buff = bytearray(b'\x31\xFE')
+    buff.append(15)
+    buff.append(0)
+    buff.append(0)
+    crc = AddCrc(buff)
+    buff.append(crc)
+    print("Data->TX {0}".format(buff.hex().upper()))
+    serTerminal.write(buff)            
 # switch to SLAVE mode
 def frame_02():
     buff = bytearray(b'\x31\xFE')
@@ -170,6 +185,20 @@ def frame_08(data):
     print("Data->TX {0}".format(buff.hex().upper()))
     serTerminal.write(buff)    
 
+def frame_19(data):
+    buff = bytearray(b'\x31\xFE')
+    buff.append(19)
+    buff.append(20)
+    buff.append(0)
+    
+    for i in range(0,20):
+        buff.append(data[i])
+    
+    crc = AddCrc(buff)
+    buff.append(crc)
+    print("Data->TX {0}".format(buff.hex().upper()))
+    serTerminal.write(buff)    
+    
 def getDataFromSerial():
     data = serialQ.get()
     if data:
@@ -186,6 +215,16 @@ def getDataFromSerialWithTimeout(timeOut):
     
     return ""  
 
+# get calibration
+def frame_18():
+    buff = bytearray(b'\x31\xFE')
+    buff.append(18)
+    buff.append(0)
+    buff.append(0)
+    crc = AddCrc(buff)
+    buff.append(crc)
+    print("Data->TX {0}".format(buff.hex().upper()))
+    serTerminal.write(buff)    
 
 def getAnyFromRS485():
     if serialQ.get():
@@ -206,6 +245,8 @@ def readSerial(ser, serialQ):
            
           
         time.sleep(1/LOOP_IN_MS) #delay 50mS
+        
+        
 
 def isPackedValid(data):
     
@@ -246,7 +287,12 @@ def isWriteConfigAckFrame(data):
     if data[2] == 3 and data[5] == 8 :
         return True
     return False
-      
+
+def isWriteCalibrationAckFrame(data):
+    if data[2] == 3 and data[5] == 19 :
+        return True
+    return False
+         
 def packetCrcCheck(data):
     crc = 0x0000
     for n in data[2:data[3]+5]:  
@@ -334,7 +380,7 @@ def getConfig(win):
     global configBuf
     win.FindElement('configProgress').UpdateBar(0, 20)
     win.FindElement('configStatus').Update("Reading...       ")
-    
+    win.Refresh()
     #getAnyFromRS485()
     frame_06()
    
@@ -386,6 +432,91 @@ def getConfig(win):
         print("Timeout")
         win.FindElement('configStatus').Update("Read ERROR  ")
         return False
+    
+def getCalibration(win):
+    global  calibrationDataBuf  
+    #getAnyFromRS485()
+    frame_18()
+   
+       
+    try:
+        data = getDataFromSerialWithTimeout(10)
+    
+        if isPackedValid(data):
+           print("Data->RX {0}".format(data.hex().upper()))
+           for i in range(0,20):
+               calibrationDataBuf[i] = data [i+5]
+           
+           dataMap["param-mainCapZero"] = fromByteArrayToFloat(data[5:9])
+           dataMap["param-smallCapZero"] = fromByteArrayToFloat(data[9:13])   
+           dataMap["param-mainCapParazitic"] = fromByteArrayToFloat(data[13:17])   
+           dataMap["param-refCapParazitic"] = fromByteArrayToFloat(data[17:21])   
+           dataMap["param-epsilion"] = fromByteArrayToFloat(data[21:25])   
+
+           win.FindElement("PARAM-MAIN_CAP_PARAZITIC").Update("{:0.2f}".format(dataMap["param-mainCapParazitic"] ))
+           win.FindElement("PARAM-REF_CAP_PARAZITIC").Update("{:0.2f}".format(dataMap["param-refCapParazitic"] ))
+             
+           win.FindElement("PARAM-MAIN_CAP_ZERO").Update("{:0.2f}".format(dataMap["param-mainCapZero"] ))  
+           win.FindElement("PARAM-SMALL_CAP_ZERO").Update("{:0.2f}".format(dataMap["param-smallCapZero"] ))  
+           
+           win.FindElement("PARAM-EPSILION").Update("{:0.3f}".format(dataMap["param-epsilion"] ))
+        return True 
+    except:
+      
+        print("Timeout")
+       
+        return False
+    
+def setCalibrationData(win, mainCapZeroOffset, smallCapZero, mainCapParazitic, refCapParazitic, epsilion):
+    global  calibrationDataBuf  
+    buff = bytearray(b'\x00\x00\x00\x00')
+    win.FindElement('ParamSetStatus').Update("               ")
+    win.Refresh()
+    struct.pack_into('f', buff, 0,float(mainCapZeroOffset))
+    
+    #----- mainCapZeroOffset ------
+    calibrationDataBuf[0] = buff [3]
+    calibrationDataBuf[1] = buff [2]
+    calibrationDataBuf[2] = buff [1]
+    calibrationDataBuf[3] = buff [0]
+    
+    struct.pack_into('f', buff, 0,float(smallCapZero))
+    calibrationDataBuf[4] = buff[3]
+    calibrationDataBuf[5] = buff[2]
+    calibrationDataBuf[6] = buff[1]
+    calibrationDataBuf[7] = buff[0]
+    
+    struct.pack_into('f', buff, 0,float(mainCapParazitic))
+    calibrationDataBuf[8] = buff[3]
+    calibrationDataBuf[9] = buff[2]
+    calibrationDataBuf[10] = buff[1]
+    calibrationDataBuf[11] = buff[0]
+    
+    struct.pack_into('f', buff, 0,float(refCapParazitic))
+    calibrationDataBuf[12] = buff[3]
+    calibrationDataBuf[13] = buff[2]
+    calibrationDataBuf[14] = buff[1]
+    calibrationDataBuf[15] = buff[0]
+    
+    
+    struct.pack_into('f', buff, 0,float(epsilion))
+    calibrationDataBuf[16] = buff[3]
+    calibrationDataBuf[17] = buff[2]
+    calibrationDataBuf[18] = buff[1]
+    calibrationDataBuf[19] = buff[0]
+    frame_19(calibrationDataBuf)
+    
+    try:
+        data = getDataFromSerialWithTimeout(0.5)
+        print("data")
+        if isPackedValid(data):
+            if isWriteCalibrationAckFrame(data):
+                print("Write OK")
+                win.FindElement('ParamSetStatus').Update("Write OK       ")
+            
+    except :
+        print("Timeout")
+        win.FindElement('ParamSetStatus').Update("Write ERROR  ")    
 
 def switchToFwUpdate():
     dummy =""
@@ -432,7 +563,7 @@ def getBuild():
     return False            
 
 def getDataFromSlave():
-    frame_14()
+    frame_15()
 
 def switchToSlaveMode():
         
@@ -443,7 +574,7 @@ def switchToSlaveMode():
         #time.sleep(DELAY_AFTER_RECEIVE) #delay 
         frame_02()
         try:
-            data = getDataFromSerialWithTimeout(0.5)
+            data = getDataFromSerialWithTimeout(1.5)
             print("Data->RX {0}".format(data.hex().upper()))
             tryCount = tryCount - 1
             if isPackedValid(data):
@@ -551,39 +682,56 @@ def getDataFromSensor(win):
    
     try:
         data = getDataFromSerialWithTimeout(0.2)
-        
+        #print("Data LLS->RX {0}".format(data.hex().upper()))  
+              ##return True
         if isPackedValid(data):
            #print("Data->RX {0}".format(data.hex().upper())) 
            if data [2] == PERIODIC_DATA_RESPONCE:
-               
-               dataMap["Cap1"] = data[8] << 8 | data[9]
-               dataMap["Cap2"] = data[10]<<8 | data[11]
-               dataMap["level1"] = data[14]<<8 | data[15]
-               dataMap["level2"] = data[16]<<8 | data[17]
-               if data[5] & 0x80:
-                  dataMap["Temp"] = (256-data[5]) * (-1)
-               else:
-                  dataMap["Temp"] = data[5]      
-               
-               
-               dataMap["Photo"] = data[7]
-               dataMap["TempError"] = data[6]
-               
-               fwVersion = "V{:02X}.{:02X}.{:02X}".format(data [18],data[19], data[20])
-             
-               
-               print("Temp: {0}; TempStatus: {1}; Photo: {2}; CAP1: {3}pF; CAP2: {4}pF; Level1: {5}; Level2: {6}".format(data[5], data[6], data[7], data[8]<<8 |data[9], data[10]<<8|data[11],  dataMap["level1"], data[16]<<8|data[17]))
-                 
-               
-        return True 
+               updateCapacityAndLevelInfo(data)
+           elif data [2] == DEBUG_DATA_RESPONCE:
+               updateCapacityAndLevelInfo(data)                 
+               print("Min CAP: {0};".format( data[21]<<8 |data[22]))
+               print ("DATA")
+               print("Tem Sensors: {0}, {1}, {2};".format(convertToSignChar(data[23]), convertToSignChar(data[24]), convertToSignChar(data[25])))
+               return True
+        else:
+            if data [1] == 1:
+                print("Data LLS->RX {0}".format(data.hex().upper()))   
+                win.write_event_value("getSlaveData", "")
+        return False
     except :
         dummy="e" 
  
         
         return False    
-    
-    
 
+def convertToSignChar(data):
+    if data & 0x80:
+        return (256-data) * (-1)
+    else:
+        return data        
+    
+def updateCapacityAndLevelInfo (data):
+    global fwVersion
+    dataMap["Cap1"] = data[8] << 8 | data[9]
+    dataMap["Cap2"] = data[10]<<8 | data[11]
+    dataMap["level1"] = data[14]<<8 | data[15]
+    dataMap["level2"] = data[16]<<8 | data[17]
+    if data[5] & 0x80:
+        dataMap["Temp"] = (256-data[5]) * (-1)
+    else:
+        dataMap["Temp"] = data[5]      
+    
+    
+    dataMap["Photo"] = data[7]
+    dataMap["TempError"] = data[6]
+    
+    fwVersion = "V{:02X}.{:02X}.{:02X}".format(data [18],data[19], data[20])
+    
+    
+    print("Temp: {0}; TempStatus: {1}; Photo: {2}; CAP1: {3}pF; CAP2: {4}pF; Level1: {5}; Level2: {6}".format(data[5], data[6], data[7], data[8]<<8 |data[9], data[10]<<8|data[11],  dataMap["level1"], data[16]<<8|data[17]))
+
+               
 
 def draw_figure(canvas, figure):
     figure_canvas_agg = FigureCanvasTkAgg(figure, canvas)
@@ -632,11 +780,12 @@ def windows_ini(width, high):
                            
                             ]
     
-    tab_layout = [
-        [sg.Column(information_column2_1)]
+    tab_layout_info = [
+        [sg.Column(information_column2_1, size=(width-350, high-150))]
         
         ]
     tab_layout_config = [
+      
         [sg.Text("Sensor lenght: "), sg.Input(size=(5, 1),  key = "-sensor-lenght-"),sg.Text("mm")],
         [sg.Text("Trigger Level:  "), sg.Input(size=(5, 1),  key = "-Level-"),sg.Text("%")],
         [sg.Text("Send Interval:  "), sg.Input(size=(5, 1),  key = "-Send-Interval-"),sg.Text("s")],
@@ -648,16 +797,42 @@ def windows_ini(width, high):
         [sg.Button("READ", key = "-read-button-"), sg.Button("WRITE", key = "-write-button-")],
       
         ]
-      
+    
+    tab_layout_param_list=[
+        
+         [sg.Text("MAIN CAP ZERO OFFSET: ")],
+         [sg.Text("SMALL CAP ZERO: ")],
+         [sg.Text("MAIN CAP PARAZITIC: ")],
+         [sg.Text("REFERENCE CAP PARAZITIC: ")],
+         [sg.Text("EPSILION: ")],
+        
+        ]
+    tab_layout_param_input=[
+        
+         [sg.Input(size=(6, 1),  key = "PARAM-MAIN_CAP_ZERO"),sg.Text("pF")],
+         [sg.Input(size=(6, 1),  key = "PARAM-SMALL_CAP_ZERO"),sg.Text("pF")],
+         [sg.Input(size=(6, 1),  key = "PARAM-MAIN_CAP_PARAZITIC"),sg.Text("pF")],
+         [sg.Input(size=(6, 1),  key = "PARAM-REF_CAP_PARAZITIC"),sg.Text("pF")],
+         [sg.Input(size=(6, 1),  key = "PARAM-EPSILION")],
+        
+        ]
+    
+    tab_layout_parameters =[
+        [sg.Column(tab_layout_param_list ), sg.Column(tab_layout_param_input ),],
+        [sg.Text("Status:"), sg.Text("                 ", key = "ParamSetStatus")],
+        [sg.Button("READ", key = "PARAMETERS_READ"), sg.Button("WRITE", key = "PARAMETERS_WRITE")],
+         ]
+    
     tab_control = [
-                    [sg.Tab("Info", layout= tab_layout)],
-                    [sg.Tab("Config", layout= tab_layout_config)]
+                    [sg.Tab("Info", layout= tab_layout_info)],
+                    [sg.Tab("Config", layout= tab_layout_config)],
+                    [sg.Tab("Parameters", layout= tab_layout_parameters)]
                   ]
     
-    infeomation_col = [[sg.Frame(layout = information_column, title="frame1",  vertical_alignment = "top", key= "frame1")]]
+    infeomation_col = [[sg.Frame(layout = information_column, title="Main",  vertical_alignment = "top", key= "frame1")]]
     
     layout = [ 
-                [sg.Column(infeomation_col,vertical_alignment = "top", background_color = "red"), sg.Column([[sg.TabGroup(tab_control)]],size =(width, high-100), vertical_alignment = "top", background_color = "red")] ,
+                [sg.Column(infeomation_col,vertical_alignment = "top", background_color = "#808080" ), sg.Column([[sg.TabGroup(tab_control)]],size =(width, high-100), vertical_alignment = "top", background_color = "#808080")] ,
                 
                
                 
@@ -676,7 +851,8 @@ def windows_ini(width, high):
      # Create the window
     window = sg.Window("EFLS-D2 Test " + version, layout, size=(width, high),finalize=True,
     element_justification="left",
-    font="Helvetica 12",)
+    font="Helvetica 12",
+    )
     return window
     
 def plot_ini(window):
@@ -718,7 +894,7 @@ def update(i, n):
     subPlot.plot(i*10, n)
     subPlot.relim()
     subPlot.show()
-    print("Update = {0}".format(i))
+    ##print("Update = {0}".format(i))
     
 def openPortThread(serialQ, bootOnlyBoud, port):
     global stop_threads
@@ -766,7 +942,7 @@ def animate(value, xs, ys):
     else:
         x_move = xs[9]       
             
-    print(x_move)
+    ##print(x_move)
     # Draw x and y lists
     subPlot.clear()
     subPlot.plot(xs, ys)
@@ -798,11 +974,16 @@ def animate2(value, xs, ys):
     # Limit x and y lists to 20 items
     xs = xs[-10:]
     ys = ys[-10:]
-
+    
+    if len(xs)< 10:
+        x_move = 10
+    else:
+        x_move = xs[9]     
     # Draw x and y lists
     subPlot2.clear()
     subPlot2.plot(xs, ys)
     
+    subPlot2.axis([xs[0],x_move, 0, 100])
     subPlot2.set_title ("CAP2", fontsize=10)
     subPlot2.set_ylabel("Y", fontsize=8)
     subPlot2.set_xlabel("t", fontsize=8)
@@ -880,24 +1061,33 @@ def main():
     global updateTaskTerminat
     global minMax
     global minMaxEnables 
+    global calibrationDataBuf
     
     minmax = [MIN_MAX_DETECTION_LEVEL,MIN_MAX_DETECTION_LEVEL]
     updateTaskTerminat = False
     minMaxEnables = False
     configBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
+    calibrationDataBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
     updateInProgress= False
     fwVersion = "____________"
     fwBuild = "_____________________"
     progress=0
-    dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0, "Sensor-Lenght":0.0, "Level-TH":0.0, "Send-Interval":0, "Mode":-1, "fwVersion":"", "boudRate":0}
+    dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0, "Sensor-Lenght":0.0, "Level-TH":0.0, "Send-Interval":0, "Mode":-1, "fwVersion":"", "boudRate":0, 
+               "param-mainCapZero":0.0,
+               "param-smallCapZero":0.0,
+               "param-mainCapParazitic":0.0,
+               "param-refCapParazitic":0.0,
+               "param-epsilion":0.0,
+               }
    
-    win = windows_ini(1360,768)
+    win = windows_ini(1024,768)
     br = plot_ini(win)
     br2 = plot2_ini(win)
     
     bootForce = False
     test_mode = False
     boudRate = RS485_BOUD_RATE_APP
+    getDataRequest = False
     n = len(sys.argv)
     for i in range(1, n):
         print(sys.argv[i], end = " \r\n")
@@ -926,7 +1116,7 @@ def main():
        
     #ports = serial.tools.list_ports.comports() 
     #win.find_element("port-list").update(values = [port.device for port in ports])
-    win.find_element("port-list").update(values = ['COM2'])
+    win.find_element("port-list").update(values = [DEFAULT_PORT])
     #print([port.device for port in ports])
     
     #else:
@@ -982,7 +1172,7 @@ def main():
                 win.FindElement('minMax').Update("{0} {1}".format(minmax[0], minmax[1]))
                       
                 animate(dataMap["level1"]/10.0, xs, ys)
-                animate2(dataMap["level2"], xs2, ys2)
+                animate2(dataMap["level2"]/10.0, xs2, ys2)
                 
                 win.FindElement('levelBar1').UpdateBar(dataMap["level1"]/10.0, 100)
                 win.FindElement('Bar1Value').Update("{0}".format(dataMap["level1"]/10.0))
@@ -1038,7 +1228,11 @@ def main():
         elif event == "RESET":
             minmax = [MIN_MAX_DETECTION_LEVEL,MIN_MAX_DETECTION_LEVEL]
             minMaxEnables = False
-               
+        elif event == "PARAMETERS_READ":
+             getCalibration(win) 
+        elif event == "PARAMETERS_WRITE":
+             setCalibrationData(win, values["PARAM-MAIN_CAP_ZERO"], values ["PARAM-SMALL_CAP_ZERO"], values["PARAM-MAIN_CAP_PARAZITIC"], values["PARAM-REF_CAP_PARAZITIC"], values["PARAM-EPSILION"]) 
+                        
         #br = draw_figure(window["-CANVAS-"].TKCanvas, fig)
       #  a.show()
         br.draw()
