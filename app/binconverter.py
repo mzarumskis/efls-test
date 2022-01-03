@@ -6,7 +6,7 @@ Created on Oct 14, 2020
 import serial
 from serial.tools.list_ports import comports
 import time
-import sys
+import sys, getopt
 import binascii
 import crc8
 import os
@@ -59,6 +59,7 @@ def crc16(data : bytearray, offset , length, crcIni):
         
         
 def convertFile():
+    global version_input
     dir_path = os.path.dirname(os.path.realpath(__file__)) +DIR_
     crcOut = 0xFFFF
     print("Opne file")
@@ -67,7 +68,7 @@ def convertFile():
     if fileName != "":
         
       
-        outFileName = dir_path+"\FuelSensor_01.01.00.bin"    
+        outFileName = dir_path+"\FuelSensor_"+version_input+".bin"    
         fileOut = open(outFileName, "wb")
         print("File to Out: {0}".format(outFileName))
        
@@ -125,9 +126,16 @@ def main():
     global stop_threads 
     global serialQ
     global serTerminal
-        
-    print("EFLS Sensor bin converter {0}".format(version))
-        
+    global version_input
+    
+    version_input="01.01.00"    
+    print("EFLS Sensor bin converter {0}\r\n".format(version))
+    print("ARG= ",sys.argv)
+    for i, arg in enumerate(sys.argv):
+        print(f"Argument {i:>6}: {arg}")
+        if arg == "-v":
+         print("VERSION=",sys.argv[i+1])
+         version_input = sys.argv[i+1]
     convertFile()
    
    
