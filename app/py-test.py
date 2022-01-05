@@ -188,10 +188,10 @@ def frame_08(data):
 def frame_19(data):
     buff = bytearray(b'\x31\xFE')
     buff.append(19)
-    buff.append(24)
+    buff.append(28)
     buff.append(0)
     
-    for i in range(0,24):
+    for i in range(0,28):
         buff.append(data[i])
     
     crc = AddCrc(buff)
@@ -444,7 +444,7 @@ def getCalibration(win):
     
         if isPackedValid(data):
            print("Data->RX {0}".format(data.hex().upper()))
-           for i in range(0,24):
+           for i in range(0,28):
                calibrationDataBuf[i] = data [i+5]
            
            dataMap["param-mainCapZero"] = fromByteArrayToFloat(data[5:9])
@@ -454,10 +454,12 @@ def getCalibration(win):
            dataMap["param-epsilion"] = fromByteArrayToFloat(data[21:25])   
            
            dataMap["param-airGapInMM"] = fromByteArrayToFloat(data[25:29])   
+           
+           dataMap["param-secCapParazitic"] = fromByteArrayToFloat(data[29:33])   
 
            win.FindElement("PARAM-MAIN_CAP_PARAZITIC").Update("{:0.2f}".format(dataMap["param-mainCapParazitic"] ))
            win.FindElement("PARAM-REF_CAP_PARAZITIC").Update("{:0.2f}".format(dataMap["param-refCapParazitic"] ))
-             
+           win.FindElement("PARAM-SEC_CAP_PARAZITIC").Update("{:0.2f}".format(dataMap["param-secCapParazitic"] ))  
            win.FindElement("PARAM-MAIN_CAP_ZERO").Update("{:0.2f}".format(dataMap["param-mainCapZero"] ))  
            win.FindElement("PARAM-SMALL_CAP_ZERO").Update("{:0.2f}".format(dataMap["param-smallCapZero"] ))  
            win.FindElement("PARAM-AIR_GAP_PLATE").Update("{:0.2f}".format(dataMap["param-airGapInMM"] ))  
@@ -471,7 +473,7 @@ def getCalibration(win):
        
         return False
     
-def setCalibrationData(win, mainCapZeroOffset, smallCapZero, mainCapParazitic, refCapParazitic, epsilion, airGap):
+def setCalibrationData(win, mainCapZeroOffset, smallCapZero, mainCapParazitic, refCapParazitic, epsilion, airGap, secCapParazitic):
     global  calibrationDataBuf  
     buff = bytearray(b'\x00\x00\x00\x00')
     win.FindElement('ParamSetStatus').Update("               ")
@@ -514,6 +516,13 @@ def setCalibrationData(win, mainCapZeroOffset, smallCapZero, mainCapParazitic, r
     calibrationDataBuf[21] = buff[2]
     calibrationDataBuf[22] = buff[1]
     calibrationDataBuf[23] = buff[0]
+    
+    
+    struct.pack_into('f', buff, 0,float(secCapParazitic))
+    calibrationDataBuf[24] = buff[3]
+    calibrationDataBuf[25] = buff[2]
+    calibrationDataBuf[26] = buff[1]
+    calibrationDataBuf[27] = buff[0]
     
     frame_19(calibrationDataBuf)
     
@@ -815,6 +824,7 @@ def windows_ini(width, high):
          [sg.Text("SMALL CAP ZERO: ")],
          [sg.Text("MAIN CAP PARAZITIC: ")],
          [sg.Text("REFERENCE CAP PARAZITIC: ")],
+         [sg.Text("SEC CAP PARAZITIC: ")],
          [sg.Text("PlATES AIR GAP: ")],
          [sg.Text("EPSILION: ")],
         
@@ -825,6 +835,7 @@ def windows_ini(width, high):
          [sg.Input(size=(6, 1),  key = "PARAM-SMALL_CAP_ZERO"),sg.Text("pF")],
          [sg.Input(size=(6, 1),  key = "PARAM-MAIN_CAP_PARAZITIC"),sg.Text("pF")],
          [sg.Input(size=(6, 1),  key = "PARAM-REF_CAP_PARAZITIC"),sg.Text("pF")],
+         [sg.Input(size=(6, 1),  key = "PARAM-SEC_CAP_PARAZITIC"),sg.Text("pF")],
          [sg.Input(size=(6, 1),  key = "PARAM-AIR_GAP_PLATE"),sg.Text("mm")],
          [sg.Input(size=(6, 1),  key = "PARAM-EPSILION")],
         
@@ -1080,7 +1091,7 @@ def main():
     updateTaskTerminat = False
     minMaxEnables = False
     configBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
-    calibrationDataBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
+    calibrationDataBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
     updateInProgress= False
     fwVersion = "____________"
     fwBuild = "_____________________"
@@ -1090,6 +1101,7 @@ def main():
                "param-smallCapZero":0.0,
                "param-mainCapParazitic":0.0,
                "param-refCapParazitic":0.0,
+               "param-secondCapParazitic":0.0,
                "param-epsilion":0.0,
                "param-airGapInMM":0.0,
                }
@@ -1250,7 +1262,8 @@ def main():
                                      values["PARAM-MAIN_CAP_PARAZITIC"], 
                                      values["PARAM-REF_CAP_PARAZITIC"], 
                                      values["PARAM-EPSILION"],
-                                     values["PARAM-AIR_GAP_PLATE"]) 
+                                     values["PARAM-AIR_GAP_PLATE"],
+                                     values["PARAM-SEC_CAP_PARAZITIC"]) 
                         
         #br = draw_figure(window["-CANVAS-"].TKCanvas, fig)
       #  a.show()
