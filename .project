@@ -14,4 +14,11 @@
 	<natures>
 		<nature>org.python.pydev.pythonNature</nature>
 	</natures>
+	<linkedResources>
+		<link>
+			<name>app/efls-silab-tool.py</name>
+			<type>1</type>
+			<location>C:/Users/mzaru/src/tools/testing/sensor-test/app/efls-silab-tool.py</location>
+		</link>
+	</linkedResources>
 </projectDescription>

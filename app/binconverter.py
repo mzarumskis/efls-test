@@ -12,11 +12,13 @@ import crc8
 import os
 
 
+
+
 FOTA_BLOCK_SZIE_IN_BYTES = 64
-BLOCK_BEFOR_CRC_ANDSIZE_BYTES = 192
+BLOCK_BEFOR_CRC_ANDSIZE_BYTES = 208     # in ST32 was BLOCK_BEFOR_CRC_ANDSIZE_BYTES = 192
 BOOT_RECORD_SIZE_BYTES = 16
 
-DIR_ = "\Debug"
+DIR_ = "\GNU ARM v10.2.1 - Default"
 #DIR_ = ""
 
 version = "V-0.0.2"
@@ -50,6 +52,7 @@ def crc16(data : bytearray, offset , length, crcIni):
     crc = crcIni
     for i in range(0, length):
         crc ^= data[offset + i] << 8
+        crc &= 0xFFFF
         for j in range(0,8):
             if (crc & 0x8000) > 0:
                 crc =(crc << 1) ^ 0x1021
@@ -83,6 +86,7 @@ def convertFile():
             print("Data Len: {0}".format(hex(len(data))))
             
             crcOut = crc16(data, 0, BLOCK_BEFOR_CRC_ANDSIZE_BYTES, crcOut)    
+            print("File CRC1 = {0}".format(hex(crcOut)))
             crcOut = crc16(data, BLOCK_BEFOR_CRC_ANDSIZE_BYTES + BOOT_RECORD_SIZE_BYTES, fileSize - BLOCK_BEFOR_CRC_ANDSIZE_BYTES - BOOT_RECORD_SIZE_BYTES, crcOut)    
             idx = BLOCK_BEFOR_CRC_ANDSIZE_BYTES
             

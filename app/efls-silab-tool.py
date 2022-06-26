@@ -39,6 +39,7 @@ from PySimpleGUI.PySimpleGUI import theme_background_color
 version = "V-0.0.1"
 
 PERIODIC_DATA_RESPONCE = 1
+EFLS_PROTOCOL_DEVICE_ID = 0xFE
 DEBUG_DATA_RESPONCE = 15
 
 FOTA_BLOCK_SZIE_IN_BYTES = 512
@@ -51,7 +52,7 @@ isSwitchedToFota = 0
 noPacketTimeout = 0
 frameErrorCounter = 0 
 RS485_BOUD_RATE_BOOT_ONLY = 230400
-RS485_BOUD_RATE_APP = 19200
+RS485_BOUD_RATE_APP = 115200
 
 DEFAULT_PORT = 'COM5'
 
@@ -174,10 +175,10 @@ def frame_06():
 def frame_08(data):
     buff = bytearray(b'\x31\xFE')
     buff.append(8)
-    buff.append(15)
+    buff.append(12)
     buff.append(0)
     
-    for i in range(0,15):
+    for i in range(0,12):
         buff.append(data[i])
     
     crc = AddCrc(buff)
@@ -252,12 +253,11 @@ def isPackedValid(data):
     
     if len(data) < 6:
         return False
+    print("LEN: {0}".format( len(data)))
+    print("LENGHT: {0}".format(((data[4]<<8) | data[3])+5))
+    if len(data) < (((data[4]<<8) | data[3])+5):
+        return False
     
-    #print("LENGHT: {0}".format(((data[4]<<8) | data[3])+6))
-    if len(data) < (((data[4]<<8) | data[3])+6):
-        return False
-    if len(data) < (((data[4]<<8) | data[3])+3):
-        return False
     #print("LENGHT2: {0}".format(((data[4]<<8) | data[3])+3))
     if data[0] != 0x31:
         return False 
@@ -307,7 +307,7 @@ def packetCrcCheck(data):
     else:
         return False
 
-def setConfig(win, sensorLength, level, sendPeriod, mode, boudRate):
+def setConfig(win, sensorLength, deviseid, sendPeriod, mode, boudRate):
     win.FindElement('configProgress').UpdateBar(0, 20)
     win.FindElement('configStatus').Update("Writing...       ")
     buff = bytearray(b'\x00\x00\x00\x00')
@@ -316,24 +316,28 @@ def setConfig(win, sensorLength, level, sendPeriod, mode, boudRate):
     print("",buff[0],buff[1],buff[2],buff[3])
     
     #----- Sensor Lenght ------
-    configBuf[6] = buff [3]
-    configBuf[7] = buff [2]
-    configBuf[8] = buff [1]
-    configBuf[9] = buff [0]
+    configBuf[3] = buff [3]
+    configBuf[4] = buff [2]
+    configBuf[5] = buff [1]
+    configBuf[6] = buff [0]
     
     #Send Period
     configBuf[0] = (int(sendPeriod) >> 8)&0xFF
     configBuf[1] = int(sendPeriod)&0xFF
+        
+   
+          
+    configBuf[2] = int(deviseid)&0xFF
     
     print("Mode set: {0}".format(comunicationType[mode]))
-    configBuf[10] = comunicationType[mode]
+    configBuf[7] = comunicationType[mode]
     
     struct.pack_into('i', buff, 0,int(boudRate))
     print("",buff[0],buff[1],buff[2],buff[3])
-    configBuf[11] = buff[3]
-    configBuf[12] = buff[2]
-    configBuf[13] = buff[1]
-    configBuf[14] = buff[0]
+    configBuf[8] = buff[3]
+    configBuf[9] = buff[2]
+    configBuf[10] = buff[1]
+    configBuf[11] = buff[0]
     
     frame_08(configBuf)
     
@@ -386,24 +390,24 @@ def getConfig(win):
    
        
     try:
-        data = getDataFromSerialWithTimeout(10)
+        data = getDataFromSerialWithTimeout(50)
     
         if isPackedValid(data):
            if isGetConfigFrame(data):
               
                print("Data->RX {0}".format(data.hex().upper()))
-               for i in range(0,15):
+               for i in range(0,11):
                    configBuf[i] = data [i+5]
               
                
-               dataMap["Sensor-Lenght"] = fromByteArrayToFloat(data[11:15])
-               dataMap["Level-TH"] = fromByteArrayToFloat(data[7:11])
+               dataMap["Sensor-Lenght"] = fromByteArrayToFloat(data[8:12])
+               dataMap["DeviceID-TH"] = data[7]
                
                dataMap["Send-Interval"] = data[5]<<8 | data[6]
                
-               dataMap["Mode"] = data[15]
+               dataMap["Mode"] = data[12]
                
-               dataMap["boudRate"] = fromByteArrayToInt(data[16:20])
+               dataMap["boudRate"] = fromByteArrayToInt(data[13:17])
                
                print("Mode= {0}".format(dataMap["Mode"] ))
                print("Mode TXT= {0}".format(getModeByEnum(dataMap["Mode"]) ))
@@ -418,7 +422,7 @@ def getConfig(win):
                print("Converted= {0}".format(dataMap["Sensor-Lenght"]))
                
                win.FindElement("-sensor-lenght-").Update("{:0.0f}".format(dataMap["Sensor-Lenght"] ))
-               win.FindElement("-Level-").Update("{:0.0f}".format(dataMap["Level-TH"] ))
+               win.FindElement("-DevID-").Update("{0}".format(dataMap["DeviceID-TH"] ))
                
                win.FindElement("-Send-Interval-").Update("{0}".format(dataMap["Send-Interval"]))
               
@@ -701,8 +705,9 @@ def getDataFromSensor(win):
     dummy =""
    
     try:
-        data = getDataFromSerialWithTimeout(0.2)
+        data = getDataFromSerialWithTimeout(0.5)
         #print("Data LLS->RX {0}".format(data.hex().upper()))  
+        print("Data->RX {0}".format(data.hex().upper()))
               ##return True
         if isPackedValid(data):
            #print("Data->RX {0}".format(data.hex().upper())) 
@@ -715,7 +720,7 @@ def getDataFromSensor(win):
                print("Tem Sensors: {0}, {1}, {2};".format(convertToSignChar(data[23]), convertToSignChar(data[24]), convertToSignChar(data[25])))
                return True
         else:
-            if data [1] == 1:
+            if data [1] != EFLS_PROTOCOL_DEVICE_ID:
                 print("Data LLS->RX {0}".format(data.hex().upper()))   
                 win.write_event_value("getSlaveData", "")
         return False
@@ -807,7 +812,7 @@ def windows_ini(width, high):
     tab_layout_config = [
       
         [sg.Text("Sensor lenght: "), sg.Input(size=(5, 1),  key = "-sensor-lenght-"),sg.Text("mm")],
-        [sg.Text("Trigger Level:  "), sg.Input(size=(5, 1),  key = "-Level-"),sg.Text("%")],
+        [sg.Text("Device ID:  "), sg.Input(size=(5, 1),  key = "-DevID-")],
         [sg.Text("Send Interval:  "), sg.Input(size=(5, 1),  key = "-Send-Interval-"),sg.Text("s")],
         [sg.Text("MODE AT START:  "), sg.Combo(["MASTER", "SLAVE"],size =(10,1), key = "Mode")],
         [sg.Text("RS485 Boud: "), sg.Input(size=(5, 1),  key = "-boudRate-")],
@@ -1090,13 +1095,13 @@ def main():
     minmax = [MIN_MAX_DETECTION_LEVEL,MIN_MAX_DETECTION_LEVEL]
     updateTaskTerminat = False
     minMaxEnables = False
-    configBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
+    configBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
     calibrationDataBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
     updateInProgress= False
     fwVersion = "____________"
     fwBuild = "_____________________"
     progress=0
-    dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0, "Sensor-Lenght":0.0, "Level-TH":0.0, "Send-Interval":0, "Mode":-1, "fwVersion":"", "boudRate":0, 
+    dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0, "Sensor-Lenght":0.0, "DeviceID-TH":0, "Send-Interval":0, "Mode":-1, "fwVersion":"", "boudRate":0, 
                "param-mainCapZero":0.0,
                "param-smallCapZero":0.0,
                "param-mainCapParazitic":0.0,
@@ -1234,7 +1239,7 @@ def main():
             getConfig(win)
         elif event == "-write-button-":
             print("Write Setting")
-            setConfig(win, values["-sensor-lenght-"], values ["-Level-"], values["-Send-Interval-"], values["Mode"], values["-boudRate-"])
+            setConfig(win, values["-sensor-lenght-"], values ["-DevID-"], values["-Send-Interval-"], values["Mode"], values["-boudRate-"])
         elif event == "STOP":  
             updateTaskTerminat = True  
             progress=0
