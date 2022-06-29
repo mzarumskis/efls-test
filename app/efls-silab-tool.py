@@ -189,10 +189,10 @@ def frame_08(data):
 def frame_19(data):
     buff = bytearray(b'\x31\xFE')
     buff.append(19)
-    buff.append(28)
+    buff.append(24)
     buff.append(0)
     
-    for i in range(0,28):
+    for i in range(0,24):
         buff.append(data[i])
     
     crc = AddCrc(buff)
@@ -448,28 +448,22 @@ def getCalibration(win):
     
         if isPackedValid(data):
            print("Data->RX {0}".format(data.hex().upper()))
-           for i in range(0,28):
+           for i in range(0,20):
                calibrationDataBuf[i] = data [i+5]
            
            dataMap["param-mainCapZero"] = fromByteArrayToFloat(data[5:9])
-           dataMap["param-smallCapZero"] = fromByteArrayToFloat(data[9:13])   
-           dataMap["param-mainCapParazitic"] = fromByteArrayToFloat(data[13:17])   
-           dataMap["param-refCapParazitic"] = fromByteArrayToFloat(data[17:21])   
-           dataMap["param-epsilion"] = fromByteArrayToFloat(data[21:25])   
-           
-           dataMap["param-airGapInMM"] = fromByteArrayToFloat(data[25:29])   
-           
-           dataMap["param-secCapParazitic"] = fromByteArrayToFloat(data[29:33])   
-
+           dataMap["param-mainCapParazitic"] = fromByteArrayToFloat(data[9:13])   
+           dataMap["param-refCapParazitic"] = fromByteArrayToFloat(data[13:17])   
+           dataMap["param-epsilion"] = fromByteArrayToFloat(data[17:21])
+           dataMap["param-airGapInMM"] = fromByteArrayToFloat(data[21:25])   
+              
            win.FindElement("PARAM-MAIN_CAP_PARAZITIC").Update("{:0.2f}".format(dataMap["param-mainCapParazitic"] ))
            win.FindElement("PARAM-REF_CAP_PARAZITIC").Update("{:0.2f}".format(dataMap["param-refCapParazitic"] ))
-           win.FindElement("PARAM-SEC_CAP_PARAZITIC").Update("{:0.2f}".format(dataMap["param-secCapParazitic"] ))  
            win.FindElement("PARAM-MAIN_CAP_ZERO").Update("{:0.2f}".format(dataMap["param-mainCapZero"] ))  
-           win.FindElement("PARAM-SMALL_CAP_ZERO").Update("{:0.2f}".format(dataMap["param-smallCapZero"] ))  
-           win.FindElement("PARAM-AIR_GAP_PLATE").Update("{:0.2f}".format(dataMap["param-airGapInMM"] ))  
-           
-           
            win.FindElement("PARAM-EPSILION").Update("{:0.3f}".format(dataMap["param-epsilion"] ))
+           win.FindElement("PARAM-AIR_GAP_PLATE").Update("{:0.2f}".format(dataMap["param-airGapInMM"] ))  
+           print("Write OK")
+           win.FindElement('ParamSetStatus').Update("Read OK       ")
         return True 
     except:
       
@@ -477,7 +471,7 @@ def getCalibration(win):
        
         return False
     
-def setCalibrationData(win, mainCapZeroOffset, smallCapZero, mainCapParazitic, refCapParazitic, epsilion, airGap, secCapParazitic):
+def setCalibrationData(win, mainCapZeroOffset, mainCapParazitic, refCapParazitic, epsilion,airGap):
     global  calibrationDataBuf  
     buff = bytearray(b'\x00\x00\x00\x00')
     win.FindElement('ParamSetStatus').Update("               ")
@@ -489,44 +483,31 @@ def setCalibrationData(win, mainCapZeroOffset, smallCapZero, mainCapParazitic, r
     calibrationDataBuf[1] = buff [2]
     calibrationDataBuf[2] = buff [1]
     calibrationDataBuf[3] = buff [0]
-    
-    struct.pack_into('f', buff, 0,float(smallCapZero))
+      
+    struct.pack_into('f', buff, 0,float(mainCapParazitic))
     calibrationDataBuf[4] = buff[3]
     calibrationDataBuf[5] = buff[2]
     calibrationDataBuf[6] = buff[1]
     calibrationDataBuf[7] = buff[0]
     
-    struct.pack_into('f', buff, 0,float(mainCapParazitic))
+    struct.pack_into('f', buff, 0,float(refCapParazitic))
     calibrationDataBuf[8] = buff[3]
     calibrationDataBuf[9] = buff[2]
     calibrationDataBuf[10] = buff[1]
     calibrationDataBuf[11] = buff[0]
     
-    struct.pack_into('f', buff, 0,float(refCapParazitic))
+    
+    struct.pack_into('f', buff, 0,float(epsilion))
     calibrationDataBuf[12] = buff[3]
     calibrationDataBuf[13] = buff[2]
     calibrationDataBuf[14] = buff[1]
     calibrationDataBuf[15] = buff[0]
     
-    
-    struct.pack_into('f', buff, 0,float(epsilion))
+    struct.pack_into('f', buff, 0,float(airGap))
     calibrationDataBuf[16] = buff[3]
     calibrationDataBuf[17] = buff[2]
     calibrationDataBuf[18] = buff[1]
     calibrationDataBuf[19] = buff[0]
-    
-    struct.pack_into('f', buff, 0,float(airGap))
-    calibrationDataBuf[20] = buff[3]
-    calibrationDataBuf[21] = buff[2]
-    calibrationDataBuf[22] = buff[1]
-    calibrationDataBuf[23] = buff[0]
-    
-    
-    struct.pack_into('f', buff, 0,float(secCapParazitic))
-    calibrationDataBuf[24] = buff[3]
-    calibrationDataBuf[25] = buff[2]
-    calibrationDataBuf[26] = buff[1]
-    calibrationDataBuf[27] = buff[0]
     
     frame_19(calibrationDataBuf)
     
@@ -781,14 +762,14 @@ def windows_ini(width, high):
                             [sg.Text("Build:"), sg.Text("__________________________________", key = "-build-")],
                             [sg.HSeparator(color = "White"),],
                             [sg.Text("                                                          ")],
-                            [sg.Text("Temp:"),sg.Text("####", key="-temp-") ],
+                            [sg.Text("Temp:", visible=False),sg.Text("####", key="-temp-",visible=False) ],
                             [sg.Text("Status"),sg.Text("####", size = (6,1),key="-tempStatus-") ],
                             [sg.Text("")],
                             
                             [sg.Text("CAP1:"),sg.Text("####", key="-cap1-") ,sg.Text("pF")],
-                            [sg.Text("CAP2:"),sg.Text("####", key="-cap2-") ,sg.Text("pF")],
+                            [sg.Text("CAP2:",visible=False),sg.Text("####", key="-cap2-",visible=False) ,sg.Text("pF",visible=False)],
                             [sg.Text("")],
-                            [sg.Text("Photo:"),sg.Text("ON", size = (6,1), key="-photo-") ],
+                            [sg.Text("Photo:",visible=False),sg.Text("ON", size = (6,1), key="-photo-", visible=False) ],
                             [sg.Button("READ", key = "getSlaveData")],                           
                             [sg.Text("")],
                             [sg.Frame(layout = frame2_layout,  title="FW")],
@@ -799,8 +780,8 @@ def windows_ini(width, high):
                             [sg.Text("___", key="Bar1Value")],
                             [sg.ProgressBar(orientation="vertical",max_value=100,size=(20, 25), key ="levelBar1"), sg.Canvas(key="-CANVAS-")],
                            
-                            [sg.Text("___",key="Bar2Value" )],
-                            [sg.ProgressBar(orientation="vertical",max_value=100,size=(20, 25), key ="levelBar2"), sg.Canvas(key="-CANVAS2-")],
+                            [sg.Text("___",key="Bar2Value",visible=False )],
+                            [sg.ProgressBar(orientation="vertical",max_value=100,size=(20, 25), key ="levelBar2",visible=False), sg.Canvas(key="-CANVAS2-",visible=False)],
                            
                            
                             ]
@@ -809,38 +790,47 @@ def windows_ini(width, high):
         [sg.Column(information_column2_1, size=(width-350, high-150))]
         
         ]
-    tab_layout_config = [
+    tab_layout_config_param_list = [
       
-        [sg.Text("Sensor lenght: "), sg.Input(size=(5, 1),  key = "-sensor-lenght-"),sg.Text("mm")],
-        [sg.Text("Device ID:  "), sg.Input(size=(5, 1),  key = "-DevID-")],
-        [sg.Text("Send Interval:  "), sg.Input(size=(5, 1),  key = "-Send-Interval-"),sg.Text("s")],
-        [sg.Text("MODE AT START:  "), sg.Combo(["MASTER", "SLAVE"],size =(10,1), key = "Mode")],
-        [sg.Text("RS485 Boud: "), sg.Input(size=(5, 1),  key = "-boudRate-")],
-        [sg.Text("Status:"), sg.Text("                 ", key = "configStatus")],
-        [sg.ProgressBar(max_value=10,size=(20, 5), key="configProgress")],
-        [sg.Text("  ")],
-        [sg.Button("READ", key = "-read-button-"), sg.Button("WRITE", key = "-write-button-")],
+        [sg.Text("Sensor lenght: ")],
+        [sg.Text("Device ID:  ")],
+        [sg.Text("Send Interval:  ")],
+        [sg.Text("MODE AT START:  ")],
+        [sg.Text("RS485 Boud: ")],
+        ]
+    
+    tab_layout_config_param_input = [
       
+        [sg.Input(size=(5, 1),  key = "-sensor-lenght-"),sg.Text("mm")],
+        [sg.Input(size=(5, 1),  key = "-DevID-")],
+        [sg.Input(size=(5, 1),  key = "-Send-Interval-"),sg.Text("s")],
+        [sg.Combo(["MASTER", "SLAVE"],size =(10,1), key = "Mode")],
+        [sg.Input(size=(5, 1),  key = "-boudRate-")],
+         ]
+    
+    
+    tab_layout_config=[
+         [sg.Column(tab_layout_config_param_list ), sg.Column(tab_layout_config_param_input),],
+         [sg.Text("Status:"), sg.Text("                 ", key = "configStatus")],
+         [sg.ProgressBar(max_value=10,size=(20, 5), key="configProgress")],
+         [sg.Text("  ")],
+         [sg.Button("READ", key = "-read-button-"), sg.Button("WRITE", key = "-write-button-")],
         ]
     
     tab_layout_param_list=[
         
          [sg.Text("MAIN CAP ZERO OFFSET: ")],
-         [sg.Text("SMALL CAP ZERO: ")],
          [sg.Text("MAIN CAP PARAZITIC: ")],
          [sg.Text("REFERENCE CAP PARAZITIC: ")],
-         [sg.Text("SEC CAP PARAZITIC: ")],
-         [sg.Text("PlATES AIR GAP: ")],
+          [sg.Text("PlATE AIR GAP: ")],
          [sg.Text("EPSILION: ")],
         
         ]
     tab_layout_param_input=[
         
          [sg.Input(size=(6, 1),  key = "PARAM-MAIN_CAP_ZERO"),sg.Text("pF")],
-         [sg.Input(size=(6, 1),  key = "PARAM-SMALL_CAP_ZERO"),sg.Text("pF")],
          [sg.Input(size=(6, 1),  key = "PARAM-MAIN_CAP_PARAZITIC"),sg.Text("pF")],
          [sg.Input(size=(6, 1),  key = "PARAM-REF_CAP_PARAZITIC"),sg.Text("pF")],
-         [sg.Input(size=(6, 1),  key = "PARAM-SEC_CAP_PARAZITIC"),sg.Text("pF")],
          [sg.Input(size=(6, 1),  key = "PARAM-AIR_GAP_PLATE"),sg.Text("mm")],
          [sg.Input(size=(6, 1),  key = "PARAM-EPSILION")],
         
@@ -1096,17 +1086,15 @@ def main():
     updateTaskTerminat = False
     minMaxEnables = False
     configBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
-    calibrationDataBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
+    calibrationDataBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
     updateInProgress= False
     fwVersion = "____________"
     fwBuild = "_____________________"
     progress=0
     dataMap = {"level1":0, "level2": 0, "Cap1":0, "Cap2":0, "Temp":0, "TempError":0, "Photo":0, "Sensor-Lenght":0.0, "DeviceID-TH":0, "Send-Interval":0, "Mode":-1, "fwVersion":"", "boudRate":0, 
                "param-mainCapZero":0.0,
-               "param-smallCapZero":0.0,
                "param-mainCapParazitic":0.0,
                "param-refCapParazitic":0.0,
-               "param-secondCapParazitic":0.0,
                "param-epsilion":0.0,
                "param-airGapInMM":0.0,
                }
@@ -1263,12 +1251,11 @@ def main():
              getCalibration(win) 
         elif event == "PARAMETERS_WRITE":
              setCalibrationData(win, values["PARAM-MAIN_CAP_ZERO"], 
-                                     values ["PARAM-SMALL_CAP_ZERO"],
                                      values["PARAM-MAIN_CAP_PARAZITIC"], 
                                      values["PARAM-REF_CAP_PARAZITIC"], 
                                      values["PARAM-EPSILION"],
                                      values["PARAM-AIR_GAP_PLATE"],
-                                     values["PARAM-SEC_CAP_PARAZITIC"]) 
+                                     ) 
                         
         #br = draw_figure(window["-CANVAS-"].TKCanvas, fig)
       #  a.show()
