@@ -41,6 +41,8 @@ version = "V-0.0.1"
 PERIODIC_DATA_RESPONCE = 1
 EFLS_PROTOCOL_DEVICE_ID = 0xFE
 DEBUG_DATA_RESPONCE = 15
+EFLSD_PROTOCOL_CMD_OFFSET = 127
+
 
 FOTA_BLOCK_SZIE_IN_BYTES = 512
 
@@ -58,8 +60,8 @@ DEFAULT_PORT = 'COM5'
 
 #Command definitions
 
-WRITE_FOTA_RECORD = 4
-WRITE_FOTA_HEADER = 11
+WRITE_FOTA_RECORD = EFLSD_PROTOCOL_CMD_OFFSET + 4
+WRITE_FOTA_HEADER = EFLSD_PROTOCOL_CMD_OFFSET+ 11
 
 comunicationType = {"MASTER":0,"SLAVE":1}
 
@@ -88,7 +90,7 @@ def frame_BOOT_Commanded():
 
 def frame_14():
     buff = bytearray(b'\x31\xFE')
-    buff.append(14)
+    buff.append(EFLSD_PROTOCOL_CMD_OFFSET+14)
     buff.append(0)
     buff.append(0)
     crc = AddCrc(buff)
@@ -98,7 +100,7 @@ def frame_14():
 
 def frame_15():
     buff = bytearray(b'\x31\xFE')
-    buff.append(15)
+    buff.append(EFLSD_PROTOCOL_CMD_OFFSET + 15)
     buff.append(0)
     buff.append(0)
     crc = AddCrc(buff)
@@ -108,7 +110,7 @@ def frame_15():
 # switch to SLAVE mode
 def frame_02():
     buff = bytearray(b'\x31\xFE')
-    buff.append(2)
+    buff.append(EFLSD_PROTOCOL_CMD_OFFSET+2)
     buff.append(0)
     buff.append(0)
     crc = AddCrc(buff)
@@ -119,7 +121,7 @@ def frame_02():
 # get Build    
 def frame_09():
     buff = bytearray(b'\x31\xFE')
-    buff.append(9)
+    buff.append(EFLSD_PROTOCOL_CMD_OFFSET+9)
     buff.append(0)
     buff.append(0)
     crc = AddCrc(buff)
@@ -164,7 +166,7 @@ def frame_11_writeFotaHeader(version):
 # get config
 def frame_06():
     buff = bytearray(b'\x31\xFE')
-    buff.append(6)
+    buff.append(EFLSD_PROTOCOL_CMD_OFFSET + 6)
     buff.append(0)
     buff.append(0)
     crc = AddCrc(buff)
@@ -174,7 +176,7 @@ def frame_06():
 
 def frame_08(data):
     buff = bytearray(b'\x31\xFE')
-    buff.append(8)
+    buff.append(EFLSD_PROTOCOL_CMD_OFFSET + 8)
     buff.append(12)
     buff.append(0)
     
@@ -188,7 +190,7 @@ def frame_08(data):
 
 def frame_19(data):
     buff = bytearray(b'\x31\xFE')
-    buff.append(19)
+    buff.append(EFLSD_PROTOCOL_CMD_OFFSET + 19)
     buff.append(24)
     buff.append(0)
     
@@ -219,7 +221,7 @@ def getDataFromSerialWithTimeout(timeOut):
 # get calibration
 def frame_18():
     buff = bytearray(b'\x31\xFE')
-    buff.append(18)
+    buff.append(EFLSD_PROTOCOL_CMD_OFFSET + 18)
     buff.append(0)
     buff.append(0)
     crc = AddCrc(buff)
@@ -265,31 +267,31 @@ def isPackedValid(data):
     return packetCrcCheck(data)
 
 def isBuildAckFrame(data):
-    if data[2] == 10:
+    if data[2] == EFLSD_PROTOCOL_CMD_OFFSET + 10:
         return True
     return False
 
 def isGetConfigFrame(data):
-    if data[2] == 7:
+    if data[2] ==EFLSD_PROTOCOL_CMD_OFFSET+ 7:
         return True
     return False
 
 def isSwticToSlavedAckFrame(data):
-    if data[2] == 3 and data[5] == 2 :
+    if data[2] == EFLSD_PROTOCOL_CMD_OFFSET + 3 and data[5] == EFLSD_PROTOCOL_CMD_OFFSET+2 :
         return True
     return False
 
 def isWriteRecorddAckFrame(data):
-    if data[2] == 5 and data[5] == 4 :
+    if data[2] == EFLSD_PROTOCOL_CMD_OFFSET + 5 and data[5] == EFLSD_PROTOCOL_CMD_OFFSET+ 4 :
         return True
     return False
 def isWriteConfigAckFrame(data):
-    if data[2] == 3 and data[5] == 8 :
+    if data[2] == EFLSD_PROTOCOL_CMD_OFFSET + 3 and data[5] ==EFLSD_PROTOCOL_CMD_OFFSET+ 8 :
         return True
     return False
 
 def isWriteCalibrationAckFrame(data):
-    if data[2] == 3 and data[5] == 19 :
+    if data[2] == EFLSD_PROTOCOL_CMD_OFFSET + 3 and data[5] == EFLSD_PROTOCOL_CMD_OFFSET+19 :
         return True
     return False
          
@@ -692,9 +694,9 @@ def getDataFromSensor(win):
               ##return True
         if isPackedValid(data):
            #print("Data->RX {0}".format(data.hex().upper())) 
-           if data [2] == PERIODIC_DATA_RESPONCE:
+           if data [2] == PERIODIC_DATA_RESPONCE + EFLSD_PROTOCOL_CMD_OFFSET:
                updateCapacityAndLevelInfo(data)
-           elif data [2] == DEBUG_DATA_RESPONCE:
+           elif data [2] == DEBUG_DATA_RESPONCE + EFLSD_PROTOCOL_CMD_OFFSET:
                updateCapacityAndLevelInfo(data)                 
                print("Min CAP: {0};".format( data[21]<<8 |data[22]))
                print ("DATA")
@@ -763,7 +765,7 @@ def windows_ini(width, high):
                             [sg.HSeparator(color = "White"),],
                             [sg.Text("                                                          ")],
                             [sg.Text("Temp:", visible=False),sg.Text("####", key="-temp-",visible=False) ],
-                            [sg.Text("Status"),sg.Text("####", size = (6,1),key="-tempStatus-") ],
+                            [sg.Text("Status",visible=False),sg.Text("####", size = (6,1),key="-tempStatus-", visible=False) ],
                             [sg.Text("")],
                             
                             [sg.Text("CAP1:"),sg.Text("####", key="-cap1-") ,sg.Text("pF")],
