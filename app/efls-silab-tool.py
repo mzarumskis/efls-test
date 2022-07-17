@@ -89,6 +89,21 @@ def AddCrc(data):
   crc = crc >> 8
   return crc & 0xFF
 
+
+
+def AddCrc8(data):
+  crc = 0x00
+  for n in data[0:]:  
+      
+      for bitnumber in range(0,8):
+        if ((crc ^ n) & 0x01) : 
+            crc =  ((crc  ^  0x18) >> 1) | 0x80
+        else:
+            crc = crc >> 1
+        n =  n >> 1 
+  
+  return crc & 0xFF
+
 def frame_BOOT_Commanded():
     global serTerminal
     buff = bytearray(b'\x2E\x2E\x2E\x2E\x2E\x2E\x2E\x2E\x2E\x2E\x2E\x2E')
@@ -115,7 +130,8 @@ def frame_15():
     crc = AddCrc(buff)
     buff.append(crc)
     print("Data->TX {0}".format(buff.hex().upper()))
-    serTerminal.write(buff)            
+    serTerminal.write(buff)     
+           
 # switch to SLAVE mode
 def frame_02():
     buff = bytearray(b'\x31\xFE')
@@ -222,6 +238,18 @@ def frame_147():
     print("Data->TX {0}".format(buff.hex().upper()))
     serTerminal.write(buff)    
     
+    
+def LLS_frame_19(intervalT):
+    buff = bytearray(b'\x31')
+    buff.append(dataMap["DeviceID-TH"])
+    buff.append(0x13)
+    buff.append(intervalT)
+    crc = AddCrc8(buff)
+    buff.append(crc)
+    print("Data->TX {0}".format(buff.hex().upper()))
+    serTerminal.write(buff)         
+    
+        
     
 def getDataFromSerial():
     data = serialQ.get()
@@ -877,6 +905,8 @@ def windows_ini(width, high):
          [sg.ProgressBar(max_value=10,size=(20, 5), key="configProgress")],
          [sg.Text("  ")],
          [sg.Button("READ", key = "-read-button-"), sg.Button("WRITE", key = "-write-button-")],
+         [sg.Text("  ")],
+         [sg.Button("LSS SET INTERVAL", key = "button-lss-set")],
         ]
     
     tab_layout_param_list=[
@@ -1331,6 +1361,8 @@ def main():
     
         elif event == "CALIBRATE-ZERO":     
             calibrateSensor(win)
+        elif event == "button-lss-set":
+            LLS_frame_19(5)     
             
         #br = draw_figure(window["-CANVAS-"].TKCanvas, fig)
       #  a.show()
