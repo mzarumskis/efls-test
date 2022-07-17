@@ -65,6 +65,15 @@ WRITE_FOTA_HEADER = EFLSD_PROTOCOL_CMD_OFFSET+ 11
 
 comunicationType = {"MASTER":0,"SLAVE":1}
 
+ 
+hwModeType ={"DIGITAL_30V_RS485":1,
+             "DIGITAL_5V_RS485":2,
+             "DIGITAL_30V_RS232":3,
+             "DIGITAL_5V_RS232":7,
+             
+             }
+
+
 def open_serial(port, boudR):
     ser = serial.Serial(port, boudR, timeout=0.1)
     return ser
@@ -191,16 +200,28 @@ def frame_08(data):
 def frame_19(data):
     buff = bytearray(b'\x31\xFE')
     buff.append(EFLSD_PROTOCOL_CMD_OFFSET + 19)
-    buff.append(24)
+    buff.append(28)
     buff.append(0)
     
-    for i in range(0,24):
+    for i in range(0,28):
         buff.append(data[i])
     
     crc = AddCrc(buff)
     buff.append(crc)
     print("Data->TX {0}".format(buff.hex().upper()))
     serTerminal.write(buff)    
+    
+    
+def frame_147():
+    buff = bytearray(b'\x31\xFE')
+    buff.append(147)
+    buff.append(0)
+    buff.append(0)
+    crc = AddCrc(buff)
+    buff.append(crc)
+    print("Data->TX {0}".format(buff.hex().upper()))
+    serTerminal.write(buff)    
+    
     
 def getDataFromSerial():
     data = serialQ.get()
@@ -294,6 +315,11 @@ def isWriteCalibrationAckFrame(data):
     if data[2] == EFLSD_PROTOCOL_CMD_OFFSET + 3 and data[5] == EFLSD_PROTOCOL_CMD_OFFSET+19 :
         return True
     return False
+
+def isCalibrationAckFrame(data):
+    if data[2] == EFLSD_PROTOCOL_CMD_OFFSET + 3 and data[5] == 147:
+        return True
+    return False
          
 def packetCrcCheck(data):
     crc = 0x0000
@@ -381,6 +407,12 @@ def getModeByEnum(mode):
         if mode == comunicationType[modeEnum]:
             return modeEnum
     return ""    
+
+def getHwModeByEnum(mode):
+    for modeEnum in hwModeType:
+        if mode == hwModeType[modeEnum]:
+            return modeEnum
+    return ""    
     
 def getConfig(win):
     global configBuf
@@ -457,13 +489,16 @@ def getCalibration(win):
            dataMap["param-mainCapParazitic"] = fromByteArrayToFloat(data[9:13])   
            dataMap["param-refCapParazitic"] = fromByteArrayToFloat(data[13:17])   
            dataMap["param-epsilion"] = fromByteArrayToFloat(data[17:21])
-           dataMap["param-airGapInMM"] = fromByteArrayToFloat(data[21:25])   
+           dataMap["param-airGapInMM"] = fromByteArrayToFloat(data[21:25])  
+           dataMap["param-zero-override"] = fromByteArrayToFloat(data[25:29])    
               
            win.FindElement("PARAM-MAIN_CAP_PARAZITIC").Update("{:0.2f}".format(dataMap["param-mainCapParazitic"] ))
            win.FindElement("PARAM-REF_CAP_PARAZITIC").Update("{:0.2f}".format(dataMap["param-refCapParazitic"] ))
            win.FindElement("PARAM-MAIN_CAP_ZERO").Update("{:0.2f}".format(dataMap["param-mainCapZero"] ))  
            win.FindElement("PARAM-EPSILION").Update("{:0.3f}".format(dataMap["param-epsilion"] ))
            win.FindElement("PARAM-AIR_GAP_PLATE").Update("{:0.2f}".format(dataMap["param-airGapInMM"] ))  
+           win.FindElement("PARAM-MAIN_CAP_ZERO_OVERRIDED").Update("{:0.2f}".format(dataMap["param-zero-override"] ))  
+           
            print("Write OK")
            win.FindElement('ParamSetStatus').Update("Read OK       ")
         return True 
@@ -473,7 +508,7 @@ def getCalibration(win):
        
         return False
     
-def setCalibrationData(win, mainCapZeroOffset, mainCapParazitic, refCapParazitic, epsilion,airGap):
+def setCalibrationData(win, mainCapZeroOffset, mainCapParazitic, refCapParazitic, epsilion,airGap, mainCapZeroOwerrided):
     global  calibrationDataBuf  
     buff = bytearray(b'\x00\x00\x00\x00')
     win.FindElement('ParamSetStatus').Update("               ")
@@ -511,6 +546,12 @@ def setCalibrationData(win, mainCapZeroOffset, mainCapParazitic, refCapParazitic
     calibrationDataBuf[18] = buff[1]
     calibrationDataBuf[19] = buff[0]
     
+    struct.pack_into('f', buff, 0,float(mainCapZeroOwerrided))
+    calibrationDataBuf[20] = buff[3]
+    calibrationDataBuf[21] = buff[2]
+    calibrationDataBuf[22] = buff[1]
+    calibrationDataBuf[23] = buff[0]
+        
     frame_19(calibrationDataBuf)
     
     try:
@@ -525,6 +566,24 @@ def setCalibrationData(win, mainCapZeroOffset, mainCapParazitic, refCapParazitic
         print("Timeout")
         win.FindElement('ParamSetStatus').Update("Write ERROR  ")    
 
+def calibrateSensor(win):
+  
+        
+    frame_147()
+    
+    try:
+        data = getDataFromSerialWithTimeout(0.5)
+        print("Data->RX {0}".format(data.hex().upper()))
+        if isPackedValid(data):
+            if isCalibrationAckFrame(data):
+                print("Calibrate OK")
+                win.FindElement('calibrationStatus').Update("Calibrate DONE!   ")
+                
+            
+    except :
+        print("Calibration ACK not received")
+        win.FindElement('calibrationStatus').Update("Calibrate ERROR!   ")    
+        
 def switchToFwUpdate():
     dummy =""
     while True:
@@ -736,8 +795,8 @@ def updateCapacityAndLevelInfo (data):
     
     fwVersion = "V{:02X}.{:02X}.{:02X}".format(data [18],data[19], data[20])
     
-    
-    print("Temp: {0}; TempStatus: {1}; Photo: {2}; CAP1: {3}pF; CAP2: {4}pF; Level1: {5}; Level2: {6}".format(data[5], data[6], data[7], data[8]<<8 |data[9], data[10]<<8|data[11],  dataMap["level1"], data[16]<<8|data[17]))
+    dataMap["hwVersion"] = data [23]
+    print("CAP1: {0}pF; Level1: {1}; HW: {2} ".format( data[8]<<8 |data[9], dataMap["level1"], getHwModeByEnum(dataMap["hwVersion"]) ))
 
                
 
@@ -762,6 +821,7 @@ def windows_ini(width, high):
                             [sg.Button("CONNECT"), sg.Button("RE-CONNECT")],
                             [sg.Text("Fw Version:"), sg.Text("____________", key="-version-") ],
                             [sg.Text("Build:"), sg.Text("__________________________________", key = "-build-")],
+                            [sg.Text("HW:"), sg.Text("__________________________________", key = "-hwVerTXT-")],
                             [sg.HSeparator(color = "White"),],
                             [sg.Text("                                                          ")],
                             [sg.Text("Temp:", visible=False),sg.Text("####", key="-temp-",visible=False) ],
@@ -822,15 +882,17 @@ def windows_ini(width, high):
     tab_layout_param_list=[
         
          [sg.Text("MAIN CAP ZERO OFFSET: ")],
+         [sg.Text("MAIN CAP ZERO VALUE: ")],
          [sg.Text("MAIN CAP PARAZITIC: ")],
          [sg.Text("REFERENCE CAP PARAZITIC: ")],
-          [sg.Text("PlATE AIR GAP: ")],
+         [sg.Text("PlATE AIR GAP: ")],
          [sg.Text("EPSILION: ")],
         
         ]
     tab_layout_param_input=[
         
          [sg.Input(size=(6, 1),  key = "PARAM-MAIN_CAP_ZERO"),sg.Text("pF")],
+         [sg.Input(size=(6, 1),  key = "PARAM-MAIN_CAP_ZERO_OVERRIDED"),sg.Text("pF")],
          [sg.Input(size=(6, 1),  key = "PARAM-MAIN_CAP_PARAZITIC"),sg.Text("pF")],
          [sg.Input(size=(6, 1),  key = "PARAM-REF_CAP_PARAZITIC"),sg.Text("pF")],
          [sg.Input(size=(6, 1),  key = "PARAM-AIR_GAP_PLATE"),sg.Text("mm")],
@@ -842,6 +904,9 @@ def windows_ini(width, high):
         [sg.Column(tab_layout_param_list ), sg.Column(tab_layout_param_input ),],
         [sg.Text("Status:"), sg.Text("                 ", key = "ParamSetStatus")],
         [sg.Button("READ", key = "PARAMETERS_READ"), sg.Button("WRITE", key = "PARAMETERS_WRITE")],
+        [sg.Text("")],
+        [sg.Button("CALIBRATE ZERO", key = "CALIBRATE-ZERO")],
+        [sg.Text("Status:"), sg.Text("                 ", key = "calibrationStatus")],
          ]
     
     tab_control = [
@@ -1047,6 +1112,8 @@ def updateValues(win):
     win.FindElement("-cap2-").Update("{0}".format(dataMap["Cap2"]))
     win.FindElement("-build-").Update(fwBuild)
     win.FindElement("-version-").Update(fwVersion)
+    win.FindElement("-hwVerTXT-").Update(getHwModeByEnum(dataMap["hwVersion"]))
+    
     
     
     
@@ -1088,7 +1155,7 @@ def main():
     updateTaskTerminat = False
     minMaxEnables = False
     configBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
-    calibrationDataBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
+    calibrationDataBuf = bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') 
     updateInProgress= False
     fwVersion = "____________"
     fwBuild = "_____________________"
@@ -1099,6 +1166,8 @@ def main():
                "param-refCapParazitic":0.0,
                "param-epsilion":0.0,
                "param-airGapInMM":0.0,
+               "param-zero-override":0.0,
+               "hwVersion":0,
                }
    
     win = windows_ini(1024,768)
@@ -1257,8 +1326,12 @@ def main():
                                      values["PARAM-REF_CAP_PARAZITIC"], 
                                      values["PARAM-EPSILION"],
                                      values["PARAM-AIR_GAP_PLATE"],
+                                     values["PARAM-MAIN_CAP_ZERO_OVERRIDED"],
                                      ) 
-                        
+    
+        elif event == "CALIBRATE-ZERO":     
+            calibrateSensor(win)
+            
         #br = draw_figure(window["-CANVAS-"].TKCanvas, fig)
       #  a.show()
         br.draw()
