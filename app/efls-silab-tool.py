@@ -405,6 +405,8 @@ def setConfig(win, sensorLength, deviseid, sendPeriod, mode, boudRate):
                 print("Write OK")
                 win.FindElement('configProgress').UpdateBar(20, 20)
                 win.FindElement('configStatus').Update("Write OK       ")
+                updateConfig(boud = boudRate)
+                win.write_event_value("RE-CONNECT", "")
             
     except :
         print("Timeout")
@@ -1023,13 +1025,18 @@ def openPortThread(serialQ, bootOnlyBoud, port):
     boudRate = RS485_BOUD_RATE_APP
     if bootOnlyBoud:
        boudRate = RS485_BOUD_RATE_BOOT_ONLY 
+    else:
+        if getDefaultBoudRateFromConfig() != 0:
+           boudRate = getDefaultBoudRateFromConfig()
+           print("Boud updated")
     
-   
+    print("COM: {0} {1}".format(port,boudRate))
+    
     try:
         serTerminal = open_serial(port, boudRate)     
         
         t1 = threading.Thread(target = readSerial, args=[serTerminal, serialQ])
-        
+        updateConfig(port)
         t1.start()
         port_connected = True
     except:
@@ -1112,6 +1119,8 @@ def animate2(value, xs, ys):
     
     #print("PLOTING")
 
+
+
 def updateThread(filePathName, win, bootMode):  
     global updateInProgress
     global updateTaskTerminat
@@ -1149,7 +1158,38 @@ def updateValues(win):
     
 
 MIN_MAX_DETECTION_LEVEL = 87.0     
+
+def updateConfig (port = 'none', boud = 0):
+    config = ConfigParser()   
+    config.read('config.ini')
     
+    if port != 'none':
+        config.set('main', 'port', port)
+    if boud != 0:
+        config.set('main', 'boud', boud)
+    
+    with open('config.ini', 'w') as f:
+        config.write(f)
+    
+    print("setting Port: "+config.get('main', 'port'))
+    print("setting boud: "+config.get('main', 'boud'))
+
+    
+def getDefaultBoudRateFromConfig():
+    boud = 0
+    config = ConfigParser()   
+    config.read('config.ini')
+    
+    try :
+        if config.get('main', 'boud') !='':
+           boud = config.get('main', 'boud')
+    except:
+        print("")
+         
+    return boud
+
+from configparser import ConfigParser    
+
     
 def main():
 
@@ -1180,7 +1220,14 @@ def main():
     global minMax
     global minMaxEnables 
     global calibrationDataBuf
+       
+    config = ConfigParser()   
+    config.read('config.ini')
     
+    #config.set('main', 'port', '')
+    #with open('config.ini', 'rw') as f:
+    #    config.write(f)
+        
     minmax = [MIN_MAX_DETECTION_LEVEL,MIN_MAX_DETECTION_LEVEL]
     updateTaskTerminat = False
     minMaxEnables = False
@@ -1234,10 +1281,20 @@ def main():
        
        time.sleep(1)  
        
-    #ports = serial.tools.list_ports.comports() 
-    #win.find_element("port-list").update(values = [port.device for port in ports])
-    win.find_element("port-list").update(values = [DEFAULT_PORT])
-    #print([port.device for port in ports])
+    ports = serial.tools.list_ports.comports() 
+    win.find_element("port-list").update(values = [port.device for port in ports])
+    #win.find_element("port-list").update(values = [DEFAULT_PORT])
+    print([port.device for port in ports])
+    
+    
+    try :
+        if config.get('main', 'port') !='':
+           print("setting: "+config.get('main', 'port')) 
+           win.find_element("port-list").update( set_to_index=[config.get('main', 'port')])
+           win.find_element("port-list").update( value=[config.get('main', 'port')])
+    except:
+        print("")
+         
     
     #else:
       
@@ -1361,6 +1418,7 @@ def main():
     
         elif event == "CALIBRATE-ZERO":     
             calibrateSensor(win)
+             
         elif event == "button-lss-set":
             LLS_frame_19(5)     
             
