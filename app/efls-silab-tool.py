@@ -28,10 +28,12 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 import numpy as np
 import datetime as dt
+import time
 import struct
 from numpy.lib.function_base import rot90
 from PIL.ImageEnhance import Color
 from PySimpleGUI.PySimpleGUI import theme_background_color
+from numpy.ma.bench import xs
 #from builtins import False
 
 #from Tkinter import *
@@ -66,9 +68,14 @@ WRITE_FOTA_HEADER = EFLSD_PROTOCOL_CMD_OFFSET+ 11
 comunicationType = {"MASTER":0,"SLAVE":1}
 
  
-hwModeType ={"DIGITAL_30V_RS485":1,
+hwModeType ={
+            "UNKNOWN" :0,
+            "DIGITAL_30V_RS485":1,
              "DIGITAL_5V_RS485":2,
              "DIGITAL_30V_RS232":3,
+             "UNKNOWN" :4,
+             "UNKNOWN" :5,
+             "UNKNOWN" :6,
              "DIGITAL_5V_RS232":7,
              
              }
@@ -278,11 +285,15 @@ def frame_18():
     print("Data->TX {0}".format(buff.hex().upper()))
     serTerminal.write(buff)    
 
-def getAnyFromRS485():
-    if serialQ.get():
-        return     
-    time.sleep(1/LOOP_IN_MS) #delay 50mS
-     
+def getAnyFromRS485(timeoutInmS = 500):
+    count = timeoutInmS/100
+    
+    while count:
+        if serialQ.get():
+            return     
+        time.sleep(1/LOOP_IN_MS) #delay 50mS
+        count = count - 1
+         
 def readSerial(ser, serialQ):
     global stop_threads
     
@@ -395,6 +406,9 @@ def setConfig(win, sensorLength, deviseid, sendPeriod, mode, boudRate):
     configBuf[10] = buff[1]
     configBuf[11] = buff[0]
     
+    if(needWaitForLss()):
+        getAnyFromRS485()
+        
     frame_08(configBuf)
     
     try:
@@ -442,19 +456,33 @@ def getHwModeByEnum(mode):
     for modeEnum in hwModeType:
         if mode == hwModeType[modeEnum]:
             return modeEnum
-    return ""    
+    return "UNKNOWN"    
+    
+    
+def needWaitForLss():
+    global lastLlsPacketTimeStamp
+    
+    timenow = int(round(time.time() * 1000))
+    diff =  timenow - lastLlsPacketTimeStamp          
+    if diff > 4800:
+        return True
+    else:
+        return False    
+        
     
 def getConfig(win):
     global configBuf
     win.FindElement('configProgress').UpdateBar(0, 20)
     win.FindElement('configStatus').Update("Reading...       ")
     win.Refresh()
-    #getAnyFromRS485()
+    
+    if(needWaitForLss()):
+        getAnyFromRS485()
     frame_06()
    
        
     try:
-        data = getDataFromSerialWithTimeout(50)
+        data = getDataFromSerialWithTimeout(0.5)
     
         if isPackedValid(data):
            if isGetConfigFrame(data):
@@ -503,7 +531,9 @@ def getConfig(win):
     
 def getCalibration(win):
     global  calibrationDataBuf  
-    #getAnyFromRS485()
+    
+    if(needWaitForLss()):
+        getAnyFromRS485()
     frame_18()
    
        
@@ -581,6 +611,10 @@ def setCalibrationData(win, mainCapZeroOffset, mainCapParazitic, refCapParazitic
     calibrationDataBuf[21] = buff[2]
     calibrationDataBuf[22] = buff[1]
     calibrationDataBuf[23] = buff[0]
+        
+        
+    if(needWaitForLss()):
+        getAnyFromRS485()
         
     frame_19(calibrationDataBuf)
     
@@ -774,10 +808,11 @@ def fwUploadTask(updateFotaHeaderOnly, filePath, win):
 
 def getDataFromSensor(win):
     global fwVersion
+    global lastLlsPacketTimeStamp
     dummy =""
    
     try:
-        data = getDataFromSerialWithTimeout(0.5)
+        data = getDataFromSerialWithTimeout(0.1)
         #print("Data LLS->RX {0}".format(data.hex().upper()))  
         print("Data->RX {0}".format(data.hex().upper()))
               ##return True
@@ -793,7 +828,8 @@ def getDataFromSensor(win):
                return True
         else:
             if data [1] != EFLS_PROTOCOL_DEVICE_ID:
-                print("Data LLS->RX {0}".format(data.hex().upper()))   
+                print("Data LLS->RX {0}".format(data.hex().upper()))
+                lastLlsPacketTimeStamp = int(round(time.time() * 1000))
                 win.write_event_value("getSlaveData", "")
         return False
     except :
@@ -1190,6 +1226,45 @@ def getDefaultBoudRateFromConfig():
 
 from configparser import ConfigParser    
 
+
+def mainReadFromSensor(win):
+    global updateInProgress
+    global minMaxEnables
+    global dataMap
+    global minmax
+    global xs,ys,xs2,ys2
+    global getBuildISAllowed
+    
+    if not updateInProgress:
+        if getDataFromSensor(win):
+            
+            if minMaxEnables:
+               if minmax[0]>  (dataMap["level1"]/10.0):
+                   minmax[0] = (dataMap["level1"]/10.0)
+            
+               if minmax[1]<  (dataMap["level1"]/10.0):
+                   minmax[1] = (dataMap["level1"]/10.0)    
+            
+            if  (dataMap["level1"]/10.0) > MIN_MAX_DETECTION_LEVEL:
+                minMaxEnables = True
+            
+            win.FindElement('minMax').Update("{0} {1}".format(minmax[0], minmax[1]))
+                  
+            animate(dataMap["level1"]/10.0, xs, ys)
+            animate2(dataMap["level2"]/10.0, xs2, ys2)
+            
+            win.FindElement('levelBar1').UpdateBar(dataMap["level1"]/10.0, 100)
+            win.FindElement('Bar1Value').Update("{0}".format(dataMap["level1"]/10.0))
+            
+            
+            win.FindElement('levelBar2').UpdateBar(dataMap["level2"]/10.0, 100)
+            win.FindElement('Bar2Value').Update("{0}".format(dataMap["level2"]/10.0))
+            if getBuildISAllowed:
+                if getBuild():
+                    getBuildISAllowed = False 
+            
+        updateValues(win)    
+
     
 def main():
 
@@ -1217,10 +1292,14 @@ def main():
     global updateInProgress
     global configBuf
     global updateTaskTerminat
-    global minMax
+    global minmax
     global minMaxEnables 
     global calibrationDataBuf
+    global lastLlsPacketTimeStamp
+    global xs,ys,xs2,ys2
+    global getBuildISAllowed
        
+    lastLlsPacketTimeStamp = 0   
     config = ConfigParser()   
     config.read('config.ini')
     
@@ -1333,35 +1412,7 @@ def main():
         win.FindElement('fwUpdateProgress').UpdateBar(progress, 100)
         win.FindElement('progress').Update("{0}%".format(progress))
         
-        if not updateInProgress:
-            if getDataFromSensor(win):
-                
-                if minMaxEnables:
-                   if minmax[0]>  (dataMap["level1"]/10.0):
-                       minmax[0] = (dataMap["level1"]/10.0)
-                
-                   if minmax[1]<  (dataMap["level1"]/10.0):
-                       minmax[1] = (dataMap["level1"]/10.0)    
-                
-                if  (dataMap["level1"]/10.0) > MIN_MAX_DETECTION_LEVEL:
-                    minMaxEnables = True
-                
-                win.FindElement('minMax').Update("{0} {1}".format(minmax[0], minmax[1]))
-                      
-                animate(dataMap["level1"]/10.0, xs, ys)
-                animate2(dataMap["level2"]/10.0, xs2, ys2)
-                
-                win.FindElement('levelBar1').UpdateBar(dataMap["level1"]/10.0, 100)
-                win.FindElement('Bar1Value').Update("{0}".format(dataMap["level1"]/10.0))
-                
-                
-                win.FindElement('levelBar2').UpdateBar(dataMap["level2"]/10.0, 100)
-                win.FindElement('Bar2Value').Update("{0}".format(dataMap["level2"]/10.0))
-                if getBuildISAllowed:
-                    if getBuild():
-                        getBuildISAllowed = False 
-                
-            updateValues(win)    
+        mainReadFromSensor(win)
                 
         # End program if user closes window or
         # presses the OK button
@@ -1402,6 +1453,7 @@ def main():
             print("Com Port: {0}".format(values["port-list"]))  
         elif event == "getSlaveData":
             getDataFromSlave()
+            mainReadFromSensor(win)
         elif event == "RESET":
             minmax = [MIN_MAX_DETECTION_LEVEL,MIN_MAX_DETECTION_LEVEL]
             minMaxEnables = False
