@@ -464,7 +464,7 @@ def needWaitForLss():
     
     timenow = int(round(time.time() * 1000))
     diff =  timenow - lastLlsPacketTimeStamp          
-    if diff > 4800:
+    if diff > 2700:
         return True
     else:
         return False    
@@ -649,24 +649,30 @@ def calibrateSensor(win):
         win.FindElement('calibrationStatus').Update("Calibrate ERROR!   ")    
         
 def switchToFwUpdate():
+    global updateTaskTerminat
     dummy =""
     while True:
         frame_BOOT_Commanded()
         try:
-            data = getDataFromSerialWithTimeout(0.2)
-            print("data")
+            data = getDataFromSerialWithTimeout(0.3)
+            print("Data->RX {0}".format(data.hex().upper()))
             if isPackedValid(data):
                return True 
         except :
             dummy="e"
             print("Timeout")
-   
+            if updateTaskTerminat==True:
+                return False
+               
    # data = getDataFromSerial()
 
 def getBuild():
     global fwBuild
+    global updateTaskTerminat
     tryCount = 3
     while(tryCount):
+        if updateTaskTerminat == True:
+            return False
         #getAnyFromRS485()
         #time.sleep(DELAY_AFTER_RECEIVE) #delay 
         frame_09()
@@ -687,20 +693,24 @@ def getBuild():
                 else:
                     print("Packet ERROR")
             else:
-                break  
+                print("NO DATA")
+                tryCount = tryCount - 1
+                #break  
         except:
-            break          
+            tryCount = tryCount - 1
+            #break          
     return False            
 
 def getDataFromSlave():
     frame_15()
 
 def switchToSlaveMode():
-        
+    global updateTaskTerminat
     tryCount = 5
     #getAnyFromRS485()
     while(tryCount):
-        
+        if updateTaskTerminat == True:
+            return False
         #time.sleep(DELAY_AFTER_RECEIVE) #delay 
         frame_02()
         try:
@@ -710,12 +720,14 @@ def switchToSlaveMode():
             if isPackedValid(data):
                  if isSwticToSlavedAckFrame(data):
                      print("Slave Mode Entered")
-                     break
+                     return True
             else:
                 print("Packet ERROR")
+                tryCount = tryCount - 1
         except :
-  
+           tryCount = tryCount - 1 
            print("Timeout")    
+    return False       
             
 def waitWriteRecordAck(idx):
     try:
@@ -862,7 +874,8 @@ def updateCapacityAndLevelInfo (data):
     fwVersion = "V{:02X}.{:02X}.{:02X}".format(data [18],data[19], data[20])
     
     dataMap["hwVersion"] = data [23]
-    print("CAP1: {0}pF; Level1: {1}; HW: {2} ".format( data[8]<<8 |data[9], dataMap["level1"], getHwModeByEnum(dataMap["hwVersion"]) ))
+    dataMap["errorFlag"] = data [24]
+    print("CAP1: {0}pF; Level1: {1}; HW: {2} {3} Er: {4}".format( data[8]<<8 |data[9], dataMap["level1"], getHwModeByEnum(dataMap["hwVersion"]), dataMap["hwVersion"], dataMap["errorFlag"] ))
 
                
 
@@ -895,6 +908,7 @@ def windows_ini(width, high):
                             [sg.Text("")],
                             
                             [sg.Text("CAP1:"),sg.Text("####", key="-cap1-") ,sg.Text("pF")],
+                            [sg.Text("FLASH:"),sg.Text("####", key="-errorflg-")] ,
                             [sg.Text("CAP2:",visible=False),sg.Text("####", key="-cap2-",visible=False) ,sg.Text("pF",visible=False)],
                             [sg.Text("")],
                             [sg.Text("Photo:",visible=False),sg.Text("ON", size = (6,1), key="-photo-", visible=False) ],
@@ -1162,12 +1176,22 @@ def updateThread(filePathName, win, bootMode):
     global updateTaskTerminat
     print("Start Fw Update process...")
     if bootMode:
-        switchToFwUpdate()
-        
-    getBuild() 
-    switchToSlaveMode()
+        if switchToFwUpdate() ==False:
+            return
+    if getBuild() == False:
+        return 
+    if switchToSlaveMode() == False:
+        return
     fwUploadTask(False, filePathName, win)
     updateInProgress = False
+    print("END Update process...")    
+          
+def checkFlashError(errorFlag):
+    if(errorFlag & 0x01 !=0):
+        return "ERROR"
+    else:
+        return "OK"
+              
           
 def updateValues(win):
     global fwBuild
@@ -1188,6 +1212,8 @@ def updateValues(win):
     win.FindElement("-build-").Update(fwBuild)
     win.FindElement("-version-").Update(fwVersion)
     win.FindElement("-hwVerTXT-").Update(getHwModeByEnum(dataMap["hwVersion"]))
+    win.FindElement("-errorflg-").Update(checkFlashError(dataMap["errorFlag"]))
+    
     
     
     
@@ -1324,6 +1350,7 @@ def main():
                "param-airGapInMM":0.0,
                "param-zero-override":0.0,
                "hwVersion":0,
+               "errorFlag":0,
                }
    
     win = windows_ini(1024,768)
